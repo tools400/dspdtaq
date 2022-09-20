@@ -1,0 +1,64 @@
+.*-------------------------------------------------------------------*
+.* DSPDQEH - Display Data Queue Entries - Help Text                  *
+.* By   Craig Rutledge, 06/11/93                                     *
+.*-------------------------------------------------------------------*
+.* >>PRE-COMPILER<<
+.*
+.*   >>CRTCMD<< CRTPNLGRP    PNLGRP(&LI/&OB) +
+.*                           SRCFILE(&SL/&SF) +
+.*                           SRCMBR(&SM);
+.*
+.*   >>COMPILE<<
+.*   >>END-COMPILE<<
+.*
+.*   >>EXECUTE<<
+.*
+.* >>END-PRE-COMPILER<<
+.*-------------------------------------------------------------------*
+:PNLGRP.
+:HELP NAME='DSPDQE'.
+Display Data Queue Entries (DSPDQE) - Help
+:P.
+The Display Data Queue Entries (DSPDQE) command allows you to view data
+queue entries with no possibility of data loss or entry resequencing.
+
+:P.The command executes a system API to access the data queue entries
+as messages and loads them into a subfile.
+.*
+:P.Please be aware of the following limitations.
+1). There can (possibly) be more entries in the dataq than the API can retrieve.
+Divide 12M by length of your data queue and you can get a fairly good
+idea of max number of entries that can be displayed.   2). The program
+will only show the first 9,999 (max subfile size) number of entries.
+These are not usually a problem.
+.*--------------------------------------------------------------------
+:LINES.
+The objects used by this command are:
+DSPDTAQ    *CMD             Command Prompt
+DSPDTAQR   *PGM    RPGLE    Entry viewer
+DSPDTAQD   *FILE   DSPF
+DSPDTAQP   *PNLGRP          Help Text
+DSPDTAQRV  *PGM    RPGLE    Validity checker
+:ELINES.
+:EHELP.
+.*--------------------------------------------------------------------
+.* HELP TEXT FOR FILE NAME.
+.*--------------------------------------------------------------------
+:HELP name='DSPDQE/DTAQ'.
+Data Queue - Help
+:XH3.Data Queue (FILE)
+:P.Specifies the name and library of the dataq to be selected.
+.*
+:PARML.
+:PT.data-queue-name
+:PD.Enter the name of the dataq whose entries you wish to display.
+.*
+:PT.:PK def.*LIBL:EPK.
+:PD.The system searches the library list to find the library where the
+dataq is located.
+.*
+:PT.library-name
+:PD.Enter the name of the library where the dataq is located.
+:EPARML.
+:EHELP.
+:EPNLGRP.

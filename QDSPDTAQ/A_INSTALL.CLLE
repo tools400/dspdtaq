@@ -1,0 +1,149 @@
+     /* =================================================================== */
+     /*                                                                     */
+     /*  Documentation:                                                     */
+     /*                                                                     */
+     /*  Utility . . . : DSPDTAQ                                            */
+     /*  Object  . . . : A_INSTALL  (PGM)                                   */
+     /*  Source member : A_INSTALL                                          */
+     /*  Source type . : CLLE                                               */
+     /*  Description   : DSPDTAQ - Installer                                */
+     /*  Author  . . . : Thomas Raddatz   <thomas.raddatz@tools400.de>      */
+     /*                                                                     */
+     /* =================================================================== */
+     /*                                                                     */
+     /*  This software is free software, you can redistribute it and/or     */
+     /*  modify it under the terms of the GNU General Public License (GPL)  */
+     /*  as published by the Free Software Foundation.                      */
+     /*                                                                     */
+     /*  See GNU General Public License for details.                        */
+     /*          http://www.opensource.org                                  */
+     /*          http://www.opensource.org/licenses/gpl-license.html        */
+     /*                                                                     */
+     /* =================================================================== */
+     /*  History:                                                           */
+     /*                                                                     */
+     /*  Datum       Name          Änderung                                 */
+     /*  ----------  ------------  ---------------------------------------  */
+     /*                                                                     */
+     /* =================================================================== */
+     /*   >>PRE-COMPILER<<                                                  */
+     /*     >>CRTCMD<<    CRTBNDCL  PGM(QTEMP/&OB) +                        */
+     /*                             SRCFILE(&SL/&SF) SRCMBR(&SM);           */
+     /*     >>IMPORTANT<<                                                   */
+     /*       >>PARM<<    OPTION(*EVENTF);                                  */
+     /*     >>END-IMPORTANT<<                                               */
+     /*     >>EXECUTE<<                                                     */
+     /*     >>CMD<<       CALL   PGM(QTEMP/A_INSTALL) +                     */
+     /*                          PARM('*CURRENT' '&SF' '&LI');              */
+     /*     >>CMD<<       DLTPGM PGM(QTEMP/A_INSTALL);                      */
+     /*   >>END-PRE-COMPILER<<                                              */
+     /* =================================================================== */
+             PGM        PARM(&TGTRLS &SRCFILE &TOLIB)
+
+             DCL        VAR(&TGTRLS   ) TYPE(*CHAR) LEN(10)
+             DCL        VAR(&SRCFILE  ) TYPE(*CHAR) LEN(10)
+             DCL        VAR(&TOLIB    ) TYPE(*CHAR) LEN(10)
+
+             DCL        VAR(&SRCLIB   ) TYPE(*CHAR) LEN(10)
+
+             CHGVAR     VAR(&SRCLIB) VALUE(&TOLIB   )
+
+     /* -------------------------------- */
+     /*  Delete old objects              */
+     /* -------------------------------- */
+             DLTCMD     CMD(&TOLIB/DSPDTAQ)
+             MONMSG     MSGID(CPF2105)
+
+             DLTF       FILE(&TOLIB/DSPDTAQE)
+             MONMSG     MSGID(CPF2105)
+
+             DLTPGM     PGM(&TOLIB/DSPDTAQR)
+             MONMSG     MSGID(CPF2105)
+
+             DLTPGM     PGM(&TOLIB/DSPDTAQRV)
+             MONMSG     MSGID(CPF2105)
+
+             DLTMOD     MODULE(&TOLIB/DSPDTAQR)
+             MONMSG     MSGID(CPF2105)
+
+             DLTMOD     MODULE(&TOLIB/DSPDTAQRV)
+             MONMSG     MSGID(CPF2105)
+
+             DLTPNLGRP  PNLGRP(&TOLIB/DSPDTAQE)
+             MONMSG     MSGID(CPF2105)
+
+             RMVMSG     PGMQ(*SAME (*)) CLEAR(*ALL)
+
+     /* -------------------------------- */
+     /*  Create display file             */
+     /* -------------------------------- */
+             CRTDSPF FILE(&TOLIB/DSPDTAQD) +
+                       SRCFILE(&SRCLIB/&SRCFILE) SRCMBR(DSPDTAQDE)
+             DLTSPLF    FILE(DSPDTAQD) JOB(*) SPLNBR(*LAST)
+             MONMSG     MSGID(CPF0000)
+
+     /* -------------------------------- */
+     /*  Create modules                  */
+     /* -------------------------------- */
+             CRTRPGMOD  MODULE(&TOLIB/DSPDTAQR) +
+                          SRCFILE(&SRCLIB/&SRCFILE) SRCMBR(*MODULE) +
+                          DBGVIEW(*LIST) TRUNCNBR(*NO) +
+                          TGTRLS(&TGTRLS)
+             DLTSPLF    FILE(DSPDTAQR) JOB(*) SPLNBR(*LAST)
+             MONMSG     MSGID(CPF0000)
+
+             CRTRPGMOD  MODULE(&TOLIB/DSPDTAQRV) +
+                          SRCFILE(&SRCLIB/&SRCFILE) SRCMBR(*MODULE) +
+                          DBGVIEW(*LIST) TRUNCNBR(*NO) +
+                          TGTRLS(&TGTRLS)
+             DLTSPLF    FILE(DSPDTAQRV) JOB(*) SPLNBR(*LAST)
+             MONMSG     MSGID(CPF0000)
+
+     /* -------------------------------- */
+     /*  Create programs                 */
+     /* -------------------------------- */
+             CRTPGM     PGM(&TOLIB/DSPDTAQR) +
+                          MODULE(&TOLIB/DSPDTAQR) +
+                          DETAIL(*BASIC)            +
+                          ACTGRP(*NEW) +
+                          TGTRLS(&TGTRLS)
+             DLTSPLF    FILE(DSPDTAQR) JOB(*) SPLNBR(*LAST)
+             MONMSG     MSGID(CPF0000)
+
+             CRTPGM     PGM(&TOLIB/DSPDTAQRV) +
+                          MODULE(&TOLIB/DSPDTAQRV) +
+                          DETAIL(*BASIC)            +
+                          ACTGRP(*NEW) +
+                          TGTRLS(&TGTRLS)
+             DLTSPLF    FILE(DSPDTAQRV) JOB(*) SPLNBR(*LAST)
+             MONMSG     MSGID(CPF0000)
+
+     /* -------------------------------- */
+     /*  Create panel groups             */
+     /* -------------------------------- */
+             CRTPNLGRP PNLGRP(&TOLIB/DSPDTAQP) +
+                          SRCFILE(&SRCLIB/&SRCFILE) +
+                          SRCMBR(DSPDTAQPE)
+             DLTSPLF    FILE(DSPDTAQP) JOB(*) SPLNBR(*LAST)
+             MONMSG     MSGID(CPF0000)
+
+     /* -------------------------------- */
+     /*  Create commands                 */
+     /* -------------------------------- */
+             CRTCMD     CMD(&TOLIB/DSPDTAQ)                          +
+                          SRCFILE(&SRCLIB/&SRCFILE) SRCMBR(DSPDTAQE) +
+                          PGM(&TOLIB/DSPDTAQR)                       +
+                          HLPSCHIDX(*NONE)                           +
+                          HLPPNLGRP(*LIBL/DSPDTAQP)                  +
+                          HLPID(DSPDTAQ)                             +
+                          PRDLIB(&TOLIB)
+             DLTSPLF    FILE(DSPDTAQE  ) JOB(*) SPLNBR(*LAST)
+             MONMSG     MSGID(CPF0000)
+
+     /* -------------------------------- */
+     /*  Delete obsolete objects         */
+     /* -------------------------------- */
+             DLTMOD     MODULE(&TOLIB/DSPDTAQR)
+             DLTMOD     MODULE(&TOLIB/DSPDTAQRV)
+
+             ENDPGM

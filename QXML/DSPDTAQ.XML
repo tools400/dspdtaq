@@ -1,0 +1,2290 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!-- Embedded DTD for validation -->
+<!DOCTYPE upload [
+<!ELEMENT compile (#PCDATA)>
+<!ATTLIST compile
+ condition CDATA #REQUIRED
+>
+<!ELEMENT copysrc (#PCDATA)>
+<!ELEMENT install_instructions (#PCDATA)>
+<!ELEMENT install_program (#PCDATA)>
+<!ELEMENT mbr (copysrc)>
+<!ATTLIST mbr
+ mbrname CDATA #REQUIRED
+ mbrtype CDATA #REQUIRED
+ mbrtext CDATA #REQUIRED
+ srcfile CDATA #REQUIRED
+ srclib CDATA #REQUIRED
+ srclen CDATA #REQUIRED
+ srccssid CDATA #REQUIRED
+>
+<!ELEMENT qcmdexc (#PCDATA)>
+<!ATTLIST qcmdexc
+ condition CDATA #REQUIRED
+ release CDATA #REQUIRED
+ dltsplf CDATA #REQUIRED
+>
+<!ELEMENT qrycond (#PCDATA)>
+<!ATTLIST qrycond
+ msg CDATA #REQUIRED
+ values CDATA #REQUIRED
+>
+<!ELEMENT sendmsg (#PCDATA)>
+<!ATTLIST sendmsg
+ sendmsgid CDATA #REQUIRED
+ sendmsgtype CDATA #REQUIRED
+>
+<!ELEMENT rtvobjd (#PCDATA)>
+<!ATTLIST rtvobjd
+ condition CDATA #REQUIRED
+ obj CDATA #REQUIRED
+ lib CDATA #REQUIRED
+ objtype CDATA #REQUIRED
+ rtnlib CDATA #IMPLIED
+>
+<!ELEMENT upload (install_instructions | install_program | qrycond |
+                  qcmdexc | sendmsg | mbr | compile | rtvobjd)+>
+<!ATTLIST upload
+ appname CDATA #REQUIRED
+ appauthor CDATA #REQUIRED
+ appblddate CDATA #REQUIRED
+>
+]>
+<upload  appname="DSPDTAQ"  appauthor="Thomas Raddatz"  appblddate=" 2/22/2012">
+<install_instructions><![CDATA[
+*----------------------------------------------------------------------------
+*  1. Upload entire XML to your AS/400 to a source file 112 long, into any mbr
+*     name not in this XML (suggest member name like ABCX or XYZX). The source
+*     file must be in the library where source and objects are to be installed.
+*
+*  2. If you have XMLPREVIEW installed, skip to step 3.
+*
+*     Copy the text between the start tag <install_program> and the end
+*     tag </install_program> into any member name (your choice)
+*     in file QRPGLESRC member type RPGLE.   CRTBNDRPG to compile.
+*     NOTE: You need extract the install program only once, this same program
+*           will install any upload on this page.
+*
+*  3. Call the install program (or execute XmlPrevew) passing these 3 parms.
+*       'your-member-name you uploaded this text into'
+*       'your-source-file-name the member is in'
+*       'your-library-name the source file is in'
+*
+*  The various source members will be extracted and the objects required
+*   for the application will be created in your-library-name.
+*----------------------------------------------------------------------------
+]]>  </install_instructions>
+<install_program><![CDATA[
+     * /// START OF INSTALL PGM HERE   ************************** ///
+     *---------------------------------------------------------------------------------------
+     * Parse / Install from xml text into source members and objects.
+     * Copyright (C) 2001    Craig Rutledge    <craig_rutledge@mohawkind.com>
+     * Martin Rowe    <Martin@dbg400.net>          scripting cmd prompts
+     * David George   <webmaster@400times.co.uk>   intellectual input
+     * Thomas Raddatz <thomas.raddatz@tools400.de> execute SQL statements
+     * Thomas Raddatz <thomas.raddatz@tools400.de> conditions
+     * Thomas Raddatz <thomas.raddatz@tools400.de> release
+     * Thomas Raddatz <thomas.raddatz@tools400.de> retrieve object description
+     *
+     * Use xml tags in text to trigger:
+     * 1. Parse text into source members (create srcfile & member if required).
+     * 2. Compile source into objects.
+     * 3. Send installation progress user messages.
+     * 4. Execute qcmdexc as required.
+     * 5. Execute SQL statements as required.
+     *
+     * This program is free software, you can redistribute it and/or modify it
+     * under the terms of the GNU General Public License as published by
+     * the Free Software Foundation.  See GNU General Public License for details
+     *---------------------------------------------------------------------------------------
+     H DFTACTGRP(*NO) ACTGRP(*CALLER) BNDDIR('QC2LE')
+     *---------------------------------------------------------------------------------------
+     Fxmlinput  if   f  112        disk    usropn                               uploaded text
+     Fqxxxsrc   o    f  112        disk    usropn                               parsed out
+     *--------------------------------------------------------------------
+     * create parm prototypes
+     *--------------------------------------------------------------------
+     *  Tokenize String
+     D strtok          PR              *          extproc('strtok')
+     D  i_string                       *   value  options(*string)
+     D  i_token                        *   value  options(*string)
+     * retrieve member description
+     D qusrmbrd        PR                  ExtPgm('QUSRMBRD')                   MEMBER DESCRIPTION
+     D  o_rcvVar                  32767a          options(*varsize)             RECEIVER
+     D  i_lenRcvVar                  10i 0 const                                LENGTH OF RECVR
+     D  i_format                      8    const                                UPLOAD TYPE
+     D  i_qFile                      20    const                                FILE   LIB
+     D  i_mbr                        10    const                                MEMBER NAME
+     D  i_ovverride                   1    const                                PROCESS OVERIDE
+     D  io_errCode                32767a          options(*varsize)             ERROR CODE
+     * retrieve object description
+     D QUSROBJD...
+     D                 PR                         extpgm('QUSROBJD')
+     D  o_rcvVar                  65535A          options(*varsize)
+     D  i_lenRcvVar                  10I 0 const
+     D  i_format                      8A   const
+     D  i_qObj                       20A   const
+     D  i_type                       10A   const
+     D  io_errCode                65535A          options(*nopass: *varsize)    | OptGrp 1
+     * send program message
+     D qmhsndpm        PR                  ExtPgm('QMHSNDPM')                   SEND MESSAGES
+     D  i_msgID                       7a   const                                ID
+     D  i_qMsgF                      20a   const                                FILE
+     D  i_msgText                 32767a   const  options(*varsize)             TEXT
+     D  i_lenMsgText                 10i 0 const                                LENGTH
+     D  i_msgType                    10a   const                                TYPE
+     D  i_callStackE                 10a   const                                STACK ENTRY
+     D  i_callStackC                 10i 0 const                                STACK COUNTER
+     D  i_msgKey                      4a   const                                KEY
+     D  io_errCode                32767a          options(*varsize)             ERROR CODE
+     * execute cl command
+     D  qcmdexc        PR                  ExtPgm('QCMDEXC')
+     D  i_cmd                        50a   Const
+     D  i_lenCmd                     15p 5 Const
+     *  Allocate Environment Handle
+     D SQLAllocEnv...
+     D                 PR                         extproc('SQLAllocEnv')
+     D                                     like(SQLRETURN_t )
+     D  o_phenv                        *   value
+     *  Allocate Connection Handle
+     D SQLAllocConnect...
+     D                 PR                         extproc('SQLAllocConnect')
+     D                                     like(SQLRETURN_t )
+     D  i_henv                             value  like(SQLHENV_t   )
+     D  o_phdbc                        *   value
+     *  Connect to a Data Source
+     D SQLConnect...
+     D                 PR                         extproc('SQLConnect')
+     D                                     like(SQLRETURN_t )
+     D  i_hdbc                             value  like(SQLHDBC_t   )
+     D  i_szDSN                        *   value  options(*string)
+     D  i_cbDSN                            value  like(SQLSMALLINT_t)
+     D  i_szUID                        *   value  options(*string)
+     D  i_cbUID                            value  like(SQLSMALLINT_t)
+     D  i_szAuthStr                    *   value  options(*string)
+     D  i_cbAuthStr                        value  like(SQLSMALLINT_t)
+     *  Set Connection Option
+     D SQLSetConnectOption...
+     D                 PR                         extproc('SQLSetConnectOption')
+     D                                     like(SQLRETURN_t )
+     D  i_hdbc                             value  like(SQLHDBC_t   )
+     D  i_fOption                          value  like(SQLSMALLINT_t)
+     D  i_vParam                           value  like(SQLPOINTER_t )
+     *  Allocate a Statement Handle
+     D SQLAllocStmt...
+     D                 PR                         extproc('SQLAllocStmt')
+     D                                     like(SQLRETURN_t )
+     D  i_hdbc                             value  like(SQLHDBC_t   )
+     D  o_phstmt                       *   value
+     *  Execute a Statement Directly
+     D SQLExecDirect...
+     D                 PR                         extproc('SQLExecDirect')
+     D                                     like(SQLRETURN_t )
+     D  i_hstmt                            value  like(SQLHSTMT_t  )
+     D  i_szSqlStr                     *   value  options(*string)
+     D  i_cbSqlStr                         value  like(SQLINTEGER_t)
+     *  Free (or Reset) a Statement Handle
+     D SQLFreeStmt...
+     D                 PR                         extproc('SQLFreeStmt')
+     D                                     like(SQLRETURN_t )
+     D  i_hstmt                            value  like(SQLHSTMT_t  )
+     D  i_fOption                          value  like(SQLSMALLINT_t)
+     *  Disconnect from a Data Source
+     D SQLDisconnect...
+     D                 PR                         extproc('SQLDisconnect')
+     D                                     like(SQLRETURN_t )
+     D  i_hdbc                             value  like(SQLHDBC_t   )
+     *  Free Connection Handle
+     D SQLFreeConnect...
+     D                 PR                         extproc('SQLFreeConnect')
+     D                                     like(SQLRETURN_t )
+     D  i_hdbc                             value  like(SQLHDBC_t   )
+     *  Free Environment Handle
+     D SQLFreeEnv...
+     D                 PR                         extproc('SQLFreeEnv')
+     D                                     like(SQLRETURN_t )
+     D  i_henv                             value  like(SQLHENV_t   )
+     *--------------------------------------------------------------------
+     D long_t          S             10I 0                    based(pDummy)
+     D short_t         S              5I 0                    based(pDummy)
+     *
+     D SQLINTEGER_t    S                   like(long_t      ) based(pDummy)
+     D SQLSMALLINT_t   S                   like(short_t     ) based(pDummy)
+     *
+     D PTR_t           S               *                      based(pDummy)
+     D SQLPOINTER_t    S                   like(PTR_t       ) based(pDummy)
+     D HENV_t          S                   like(long_t      ) based(pDummy)
+     D HDBC_t          S                   like(long_t      ) based(pDummy)
+     D HSTMT_t         S                   like(long_t      ) based(pDummy)
+     D RETCODE_t       S                   like(SQLINTEGER_t) based(pDummy)
+     *
+     D SQLHENV_t       S                   like(HENV_t      ) based(pDummy)
+     D SQLHDBC_t       S                   like(HDBC_t      ) based(pDummy)
+     D SQLHSTMT_t      S                   like(HSTMT_t     ) based(pDummy)
+     D SQLRETURN_t     S                   like(RETCODE_t   ) based(pDummy)
+     *
+     D retCode         S                   like(SQLRETURN_t) inz
+     D hdbc            S                   like(SQLHDBC_t  ) inz
+     D hstmt           S                   like(SQLHSTMT_t ) inz
+     D henv            S                   like(SQLHENV_t  ) inz
+     D sqlInit         S              1A                     inz(*off)
+     D cOptVal         S             10I 0                   inz
+     *
+     D SQL_NTS         C                   const( -3)
+     D SQL_COMMIT_NONE...
+     D                 C                   const(  1)
+     D SQL_ATTR_COMMIT...
+     D                 C                   const(  0)
+     D SQL_DROP        C                   const(  1)
+     *--------------------------------------------------------------------
+     * Read element
+     *--------------------------------------------------------------------
+     D readElement     PR                        like(bldexc)
+     D  i_element                     9A   value varying
+     *--------------------------------------------------------------------
+     * Define function prototype to double quotes in a string
+     *--------------------------------------------------------------------
+     D dblQuotes       PR          2048A         varying
+     D  i_string                   2048A   value varying
+     *--------------------------------------------------------------------
+     * Define function prototype to get attribute data from a string
+     *--------------------------------------------------------------------
+     D getAttrData...
+     D                 PR          2000A          varying                       like(string_t)
+     D  i_attr                       10a   value
+     D  i_string                   2000A   value  varying                       like(string_t)
+     D  i_default                  2000A   value  varying                       like(string_t)
+     *--------------------------------------------------------------------
+     * Define function prototype to check for a condition
+     *--------------------------------------------------------------------
+     D isCondition...
+     D                 PR              n
+     D  i_condList                 2000A   value
+     *---------------------------------------------------------------------------------------
+     D loadConditions...
+     D                 PR                  dim(32) like(condition)
+     D  i_conditions                128A   value
+     *--------------------------------------------------------------------
+     D isRelease...
+     D                 PR              n
+     D  i_release                    10A   value
+     *--------------------------------------------------------------------
+     D setTargetRelease...
+     D                 PR          2000A          varying
+     D  i_keyword                    10A   value  varying
+     D  i_string                   2000A   value  varying
+     D  i_value                      10A   value  varying
+     *--------------------------------------------------------------------
+     D setVariable...
+     D                 PR
+     D  i_fldName                    10A   value  varying
+     D  i_value                      64A   value  varying
+     *---------------------------------------------------------------------------------------------
+     D getVarName...
+     D                 PR            11a          varying
+     D  i_bldexc                           value  like(bldexc)
+     D  i_pos                        10i 0 value
+     *---------------------------------------------------------------------------------------------
+     D getVarValue...
+     D                 PR            64a          varying
+     D  i_name                       11a   value  varying
+     *---------------------------------------------------------------------------------------------
+     D uCase...
+     D                 PR          2000A          varying
+     D  i_string                   2000A   value  varying
+     *--------------------------------------------------------------------
+     D vrcvar          s            145
+     D qm_msgid        s              7
+     D qm_msgtxt       s            500
+     D qm_msgq         s             10
+     D qm_msgtyp       s             10
+     D mbrname         s             10
+     D mbrtype         s             10
+     D mbrtext         s             50
+     D srcfile         s             10
+     D srclen          s              5
+     D srclenN         s              5  0   inz(0)
+     D srccssid        s              5
+     D bldexc          s           2000
+     D write_flag      s              1n   inz(*off)
+     D srcSeqno        s              6s 2 inz(0)
+     D aa              s              5u 0 inz(0)
+     D ll              s              5u 0 inz(0)
+     D qs              c                   ''''
+     D qd              c                   '"'
+     D errFLag         s              1    inz(*off)
+     D cnd_msg         s             42
+     D cnd_values      s            110
+     D cnd_rtnVal      s             10
+     D cnd_array       s                   dim(32) inz like(condition)
+     D cnd_ptr         s             10i 0 inz
+     D condition       s             10a
+     D condList        s           2000a
+     D release         s             10a
+     D dltsplf         s             10a
+     D objd_obj        s             10a
+     D objd_lib        s             10a
+     D objd_objtype    s             10a
+     D objd_rtnlib     s             10a
+     D objd0100        ds
+     D  od_bytRet              1      4i 0
+     D  od_bytAvl              5      8i 0
+     D  od_name                9     18a
+     D  od_lib                19     28a
+     D  od_type               29     38a
+     D  od_rtnLib             39     48a
+     D fld_array       ds
+     D  fld_x                        10i 0 inz
+     D  fld_name                     11a   inz dim(64) varying
+     D  fld_value                    64a   inz dim(64) varying
+     D var_name        s             11a   inz varying
+     D var_value       s             64a   inz varying
+     * Error return code parm for APIs.
+     D errCode         DS
+     D  errCode_bytPrv...
+     D                               10i 0 inz(%size(errCode))
+     D  errCode_bytAvl...
+     D                               10i 0 inz(0)
+     D  errCode_excID...
+     D                                7a   inz
+     D  errCode_reserved...
+     D                                1a   inz
+     D  errCode_escData...
+     D                              256a   inz
+     * Optional parameters
+     D OvrSrcFile      s                   like(i_OvrSrcFile) inz
+     D isPreDefCond    s               N   inz(*off)
+     D TgtRls          s                   like(i_TgtRls    ) inz
+     *
+     * Program status data structure.
+     D sds            sds
+     D  sds_pgmName                  10A
+     D  sds_status                    5S 0
+     D  sds_prvStat                   5S 0
+     D  sds_lastSeq                   8A
+     D  sds_lastSubR                  8A
+     D  sds_numParm                   3S 0
+     D  sds_msgID                     7A
+     D  sds_MiInstr                   4A
+     D  sds_wrkArea                  30A
+     D  sds_lib                      10A
+     D  sds_msgText                  80A
+     *--------------------------------------------------------------------
+     Ixmlinput  ns
+     I                                 13   21  xmltag1
+     I                                 18   27  xmltag2
+     I                                 13  112  xmlcode
+     *--------------------------------------------------------------------
+     C     *entry        plist
+     C                   parm                    ParseSrcMbr      10            source member
+     C                   parm                    ParseSrcFile     10            source file
+     C                   parm                    ParseSrcLib      10            source lib
+     *  optional parameters:
+     C                   parm                    i_OvrSrcFile     10            override to src
+     C                   parm                    i_Conditions    128            pre-def conditions
+     C                   parm                    i_TgtRls         10            target release
+     *
+     *  get optional parameter: Overrride to Source File
+ B01 C                   if        %parms() >= 4
+     C                   eval      OvrSrcFile = i_OvrSrcFile
+ X01 C                   else
+     C                   eval      OvrSrcFile = ''
+ E01 C                   endif
+     *
+     *  get optional parameter: Conditions
+ B01 C                   if        %parms() >= 5
+ B02 C                   if        i_Conditions <> ''
+     C                   eval      cnd_array = loadConditions(i_Conditions)
+     C                   eval      isPreDefCond = *on
+ X02 C                   else
+     C                   eval      isPreDefCond = *off
+ E02 C                   endif
+ E01 C                   endif
+     *
+     *  get optional parameter: Target Release
+ B01 C                   if        %parms() >= 6
+     C                   eval      TgtRls = i_TgtRls
+ X01 C                   else
+     C                   eval      TgtRls = ''
+ E01 C                   endif
+     *
+     C                   exsr      srValidate                                   make sure exist
+     *
+     * Set user selected library *first for remainder of program
+     C                   eval      bldexc = 'RMVLIBLE LIB('+
+     C                             %trimr(ParseSrcLib) + ')'
+     C                   callp(e)  qcmdexc(bldexc:%len(%trimr(bldexc)))
+     *
+     C                   eval      bldexc = 'ADDLIBLE LIB('+
+     C                             %trimr(ParseSrcLib) + ') POSITION(*FIRST)'
+     C                   callp(e)  qcmdexc(bldexc:%len(%trimr(bldexc)))
+     *
+     *       CPF2103 - Library &1 already exists in library list.
+ B01 C                   if        %error and sds_msgID <> 'CPF2103'
+     C                   eval      qm_msgtxt = '0000 ' + sds_msgText
+     C                   exsr      srKill
+ E01 C                   endif
+     *
+     * Set variable &TOLIB
+     C                   callp     setVariable('tolib': ParseSrcLib)
+     *
+     * Override Input file to uploaded text file
+     C                   eval      bldexc = 'OVRDBF FILE(XMLINPUT) TOFILE(' +
+     C                             %trimr(ParseSrcLib)+'/'+
+     C                             %trimr(ParseSrcFile) + ') MBR(' +
+     C                             %trimr(ParseSrcMbr) + ')'
+     C                   callp     qcmdexc(bldexc:%len(%trimr(bldexc)))
+    C                   open      xmlinput
+    C                   read      xmlinput
+ B01 C                   dow       not %eof
+     * write records to outfile if flag is on
+ B02 C                   select
+     C                   when      write_flag = *on
+ B03 C                   if        xmltag2<>'</copysrc>'
+     C                   eval      srcSeqno=srcSeqno+1
+     C                   except    write_one
+ X03 C                   else
+     C                   eval      write_flag=*off
+    C                   close     qxxxsrc
+ E03 C                   endif
+     *
+     * Extract values based on xml tags.
+     C                   when      xmltag1 = 'mbrname ='
+     C                   eval      mbrname = %subst(xmlcode:13:10)
+     C                   when      xmltag1 = 'mbrtype ='
+     C                   eval      mbrtype =%subst(xmlcode:13:10)
+     C                   when      xmltag1 = 'mbrtext ='
+     C                   eval      mbrtext =dblQuotes(%subst(xmlcode:13:50))
+     C                   when      xmltag1 = 'srcfile ='
+ B03 C                   if        OvrSrcFile <> ''
+     C                   eval      srcfile =OvrSrcFile
+ X03 C                   else
+     C                   eval      srcfile =%subst(xmlcode:13:10)
+ E03 C                   endif
+     C                   when      xmltag1 = 'srclen  ='
+     C                   eval      srclen  =%subst(xmlcode:13:5)
+     C                   when      xmltag1 = 'srccssid='
+     C                   eval      srccssid=%subst(xmlcode:13:5)
+     *--------------------------------------------------------------------
+     * Start of data to copy.  Create source files/mbrs as required.
+     *--------------------------------------------------------------------
+     C                   when      xmltag1='<copysrc>'
+     C                   move      srclen        srclenN
+     * crtsrcpf
+     C                   eval      bldexc = 'CRTSRCPF FILE(' +
+     C                             %trimr(ParseSrcLib)+'/'+
+     C                             %trimr(srcfile) + ') RCDLEN(' +
+     C                             srclen + ') CCSID(' +
+     C                             srccssid + ')'
+     C                   callp(e)  qcmdexc(bldexc:%len(%trimr(bldexc)))
+     * addpfm
+     C                   eval      bldexc = 'ADDPFM   FILE(' +
+     C                             %trimr(ParseSrcLib)+'/'+
+     C                             %trimr(srcfile) + ') MBR(' +
+     C                             %trimr(mbrname) + ') SRCTYPE(' +
+     C                             %trimr(mbrtype) + ') TEXT(' +
+     C                             qs+%trimr(mbrtext)+qs + ')'
+     C                   callp(e)  qcmdexc(bldexc:%len(%trimr(bldexc)))
+ B03 C                   if        %error
+     * chgpfm
+     C                   eval      bldexc = 'CHGPFM   FILE(' +
+     C                             %trimr(ParseSrcLib)+'/'+
+     C                             %trimr(srcfile) + ') MBR(' +
+     C                             %trimr(mbrname) + ') TEXT(' +
+     C                             qs+%trimr(mbrtext)+qs + ')'
+     C                   callp     qcmdexc(bldexc:%len(%trimr(bldexc)))
+     * clr mbr
+     C                   eval      bldexc = 'CLRPFM   FILE(' +
+     C                             %trimr(ParseSrcLib)+'/'+
+     C                             %trimr(srcfile) + ') MBR(' +
+     C                             %trimr(mbrname) + ')'
+     C                   callp     qcmdexc(bldexc:%len(%trimr(bldexc)))
+ E03 C                   endif
+     * ovr to outfile mbr
+     C                   eval      bldexc = 'OVRDBF QXXXSRC ' +
+     C                             %trimr(ParseSrcLib) + '/' +
+     C                             %trimr(srcfile) + ' ' +
+     C                             mbrname
+     C                   callp     qcmdexc(bldexc:%len(%trimr(bldexc)))
+     C                   clear                   srcSeqno
+    C                   open      qxxxsrc
+     C                   eval      write_flag = *on
+     *--------------------------------------------------------------------
+     * Compile statement.  Read next record and execute it.
+     * The subroutine TolibToken will replace &tolib with the
+     * library the user has selected at run time.
+     *--------------------------------------------------------------------
+     C                   when      xmltag1 = '<compile '
+     C                   eval      condList= getAttrData('condition':xmlcode:'')
+    C                   read      xmlinput
+     C                   eval      bldexc = readElement('compile')
+ B03 C                   if        isCondition(condList)
+     C                   exsr      TolibToken
+     C                   exsr      RplVars
+     C                   exsr      SetTgtRls
+     C                   callp     qcmdexc(bldexc:%len(%trimr(bldexc)))
+ E03 C                   endif
+     *--------------------------------------------------------------------
+     * qcmdexc statement. Build statement from each record between start
+     * and stop tags.  When stop tag is found, execute statement.
+     *--------------------------------------------------------------------
+     C                   when      xmltag1 = '<qcmdexc '
+     C                   eval      condList = getAttrData('condition'
+     C                                                    :xmlcode:'')
+     C                   eval      release  = getAttrData('release'
+     C                                                    :xmlcode:'*CURRENT')
+     C                   eval      dltsplf  = getAttrData('dltsplf'
+     C                                                    :xmlcode:'*NONE')
+    C                   read      xmlinput
+     C                   eval      bldexc = readElement('qcmdexc')
+ B03 C                   if        isCondition(condList) and isRelease(release)
+     C                   exsr      TolibToken
+     C                   exsr      RplVars
+     C                   exsr      SetTgtRls
+ B04 C                   if        %subst(bldexc: 1: 3) = 'DLT'
+     C                   callp (e) qcmdexc(bldexc:%len(%trimr(bldexc)))
+ X04 C                   else
+     C                   callp (e) qcmdexc(bldexc:%len(%trimr(bldexc)))
+ B05 C                   if        %error()
+     C                   eval      qm_msgtxt = '0000 Failed to execute: '+bldexc
+     C                   exsr      srKill
+ E05 C                   endif
+ B05 C                   if        dltsplf <> '' and dltsplf <> '*NONE'
+     C                   eval      bldexc = 'DLTSPLF FILE(' + dltsplf +
+     C                                      ') JOB(*) SPLNBR(*LAST)'
+     C                   callp (e) qcmdexc(bldexc:%len(%trimr(bldexc)))
+ E05 C                   endif
+ E04 C                   endif
+ E03 C                   endif
+     *--------------------------------------------------------------------
+     * SQL statement. Build statement from each record between start
+     * and stop tags.  When stop tag is found, execute SQL statement.
+     *--------------------------------------------------------------------
+     C                   when      xmltag1 = '<execsql '
+     C                   eval      condList = getAttrData('condition'
+     C                                                    :xmlcode:'')
+    C                   read      xmlinput
+     C                   eval      bldexc = readElement('execsql')
+ B03 C                   if        isCondition(condList)
+     C                   exsr      TolibToken
+     C                   exsr      RplVars
+     C                   exsr      srSQLExecute
+ E03 C                   endif
+     *--------------------------------------------------------------------
+     * Send messages to user as program executes
+     * Extract message ID, Message Type, from <sendmsg>
+     * read a record and get the single line of message text.
+     *--------------------------------------------------------------------
+     C                   when      xmltag1 = '<sendmsg '
+     C                   eval      qm_msgid = %subst(xmlcode:22:7)
+     C                   eval      qm_msgtyp = %subst(xmlcode:46:10)
+    C                   read      xmlinput
+     C                   eval      qm_msgq   = '*EXT   '
+     C                   eval      qm_msgtxt = xmlcode
+     C                   exsr      srSndMessage
+     *--------------------------------------------------------------------
+     * rtvobjd statement. retrieve object description of the specified
+     * object. Store attributes in specified fields.
+     *--------------------------------------------------------------------
+     C                   when      xmltag1 = '<rtvobjd '
+     C                   eval      condList = getAttrData('condition'
+     C                                                    :xmlcode:'')
+     C                   eval      bldexc = readElement('rtvobjd')
+     C                   eval      objd_obj    =getAttrData('obj'    :bldexc:'')
+     C                   eval      objd_lib    =getAttrData('lib'    :bldexc:'')
+     C                   eval      objd_objtype=getAttrData('objtype':bldexc:'')
+     C                   eval      objd_rtnlib =getAttrData('rtnlib' :bldexc:'')
+ B03 C                   if        isCondition(condList)
+     C                   exsr      srRtvObjD
+ E03 C                   endif
+     *--------------------------------------------------------------------
+     * chgvar statement.
+     *--------------------------------------------------------------------
+     C                   when      xmltag1 = '<chgvar  '
+     C                   eval      condList = getAttrData('condition'
+     C                                                    :xmlcode:'')
+     C                   eval      bldexc = readElement('chgvar')
+     C                   eval      var_name  = getAttrData('var'    :bldexc:'')
+     C                   eval      var_value = getAttrData('value'  :bldexc:'')
+ B03 C                   if        isCondition(condList)
+     C                   exsr      srChgVar
+ E03 C                   endif
+     *--------------------------------------------------------------------
+     * Query condition
+     *--------------------------------------------------------------------
+     C                   when      xmltag1 = '<qrycond '
+     C                   eval      bldexc = readElement('qrycond')
+     C                   eval      cnd_msg    = getAttrData('msg'   : bldexc:'')
+     C                   eval      cnd_values = getAttrData('values': bldexc:'')
+     C                   exsr      srQueryCond
+ E02 C                   endsl
+     *
+    C                   read      xmlinput
+ E01 C                   enddo
+     *
+     C                   exsr      srSQLEnd
+     C                   eval      *inlr=*on
+     C                   return
+     *--------------------------------------------------------------------
+     * Replace &tolib (no matter how many times it is in the string)
+     * with whatever library the user has selected at run time.
+     *--------------------------------------------------------------------
+     C     TolibToken    begsr
+     C                   eval      aa=%scan('&tolib':bldexc)
+ B01 C                   dow       aa>0
+     C                   eval      bldexc=%replace(%trimr(ParseSrcLib):bldexc:
+     C                             aa:6)
+     C                   eval      aa=%scan('&tolib':bldexc)
+ E01 C                   enddo
+     *  user has selected to override source, reset SRCFILE parm in bldexcs.
+ B01 C                   if        OvrSrcFile <> ''                             xmlpreview override
+     C                   eval      aa=%scan('SRCFILE(':bldexc)
+ B02 C                   if        aa>0
+     C                   eval      aa=%scan('/':bldexc:aa)
+ B03 C                   if        aa>0
+     C                   eval      ll=%scan(')':bldexc:aa)
+     C                   eval      bldexc=%replace(
+     C                               %trimr(OvrSrcFile):bldexc:aa+1:ll-(aa+1))
+ E03 C                   endif
+ E02 C                   endif
+ E01 C                   endif
+     C                   endsr
+     *--------------------------------------------------------------------
+     * Replace variable names with their associated values.
+     *--------------------------------------------------------------------
+     C     RplVars       begsr
+     C                   eval      aa=%scan('&':bldexc)
+ B01 C                   dow       aa>0
+     C                   eval      var_name=getVarName(bldexc:aa)
+     C                   eval      var_value=getVarValue(var_name)
+     C                   eval      bldexc=%replace(var_value:bldexc:aa
+     C                                             :%len(var_name))
+     C                   eval      aa=%scan('&':bldexc)
+ E01 C                   enddo
+     C                   endsr
+     *--------------------------------------------------------------------
+     * Sets the target release according to the optional parameter
+     * i_TgtRls.
+     *--------------------------------------------------------------------
+     C     SetTgtRls     begsr
+ B01 C                   if        TgtRls = ''
+     C                   leavesr
+ E01 C                   endif
+     C                   eval      bldexc =
+     C                                setTargetRelease('TGTRLS': bldexc: TgtRls)
+     C                   endsr
+     *--------------------------------------------------------------------
+     * Check of file, lib, member exist.
+     *--------------------------------------------------------------------
+     C     srValidate    begsr
+     C                   callp     QUSRMBRD(
+     C                             vrcvar:
+     C                             145:
+     C                             'MBRD0100':
+     C                             ParseSrcFile + ParseSrcLib:
+     C                             ParseSrcMbr:
+     C                             '0':
+     C                             errCode)
+     *   --------------------------------------------------------------------------------
+     *   If error occurred on call, send appropriate message back to user.
+     *   ---------------------------------------------------------------------------------
+ B01 C                   if        errCode_bytAvl <> 0                          error occurred
+ B02 C                   select
+     * lib not found
+     C                   when      errCode_excID = 'CPF9810'
+     C                   eval      qm_msgtxt = '0000 Library ' +
+     C                             %trimr(ParseSrcLib) + ' was not found.'
+     * src file not found
+     C                   when      errCode_excID = 'CPF9812'
+     C                   eval      qm_msgtxt = '0000 Source file ' +
+     C                             %trimr(ParseSrcFile)+' was not found in ' +
+     C                             %trimr(ParseSrcLib) + '.'
+     * member not found
+     C                   when      errCode_excID = 'CPF9815'
+     C                   eval      qm_msgtxt = '0000 Member ' +
+     C                             %trimr(ParseSrcMbr)+' was not found in ' +
+     C                             %trimr(ParseSrcLib)+'/'+ %trimr(ParseSrcFile)
+     * unexpected
+ X02 C                   other
+     C                   eval      qm_msgtxt = '0000 Unexpected message ' +
+     C                             errCode_excID + ' received. '
+ E02 C                   endsl
+     * send message
+     C                   exsr      srKill
+     C                   eval      *inlr=*on
+     C                   return
+ E01 C                   endif
+     C                   endsr
+     *--------------------------------------------------------------------
+     * kill application
+     *--------------------------------------------------------------------
+     C     srKill        begsr
+     C                   eval      qm_msgid  = 'CPD0006'
+     C                   eval      qm_msgtyp = '*DIAG'
+     C                   eval      qm_msgq   = '*CTLBDY'
+     C                   exsr      srSndMessage
+     C                   eval      qm_msgtxt = *blanks
+     C                   eval      qm_msgid  = 'CPF0002'
+     C                   eval      qm_msgtyp = '*ESCAPE'
+     C                   exsr      srSndMessage
+     C                   endsr
+     *--------------------------------------------------------------------
+     * call send program message api
+     *--------------------------------------------------------------------
+     C     srSndMessage  begsr
+     C                   callp     QMHSNDPM(
+     C                             qm_msgid:
+     C                             'QCPFMSG   *LIBL     ':
+     C                             qm_msgtxt:
+     C                             %size(qm_msgtxt):
+     C                             qm_msgtyp:
+     C                             qm_msgq:
+     C                             1:
+     C                             '    ':
+     C                             errCode)
+     C                   endsr
+     *--------------------------------------------------------------------
+     * retrieve object description and store attributes
+     *--------------------------------------------------------------------
+     C     srRtvObjD     begsr
+     C                   callp     QUSROBJD(objd0100
+     C                                      : %size(objd0100)
+     C                                      : 'OBJD0100'
+     C                                      : objd_obj + objd_lib
+     C                                      : objd_objtype
+     C                                      : errCode)
+ B01 C                   if        errCode_bytAvl <> 0                          error occurred
+     C                   eval      qm_msgtxt = '0000 Failed to retrieve +
+     C                             object description of object ' +
+     C                             %trim(objd_lib) + '/' + %trim(objd_obj) +
+     C                             ' type ' + %trim(objd_objtype) + '.'
+     * send message
+     C                   exsr      srKill
+ X01 C                   else
+     C                   callp     setVariable(objd_rtnlib: od_rtnlib)
+ E01 C                   endif
+     C                   endsr
+     *--------------------------------------------------------------------
+     * change variable
+     *--------------------------------------------------------------------
+     C     srChgVar      begsr
+     C                   callp     setVariable(var_name: var_value)
+     C                   endsr
+     *--------------------------------------------------------------------
+     * execute SQL statement.
+     *--------------------------------------------------------------------
+     C     srSQLExecute  begsr
+     C                   exsr      srSQLInit
+     C                   Eval      retCode = SQLExecDirect(hstmt    :
+     C                                                     bldexc   :
+     C                                                     SQL_NTS  )
+     C                   endsr
+     *--------------------------------------------------------------------
+     * query condition.
+     *--------------------------------------------------------------------
+     C     srQueryCond   begsr
+ B01 C                   if        isPreDefCond = *off
+     C                   eval      cnd_values = uCase(cnd_values)
+ B02 C                   dou       (%scan(cnd_rtnVal: cnd_values) > 0) and
+     C                             (cnd_rtnval <> ''                 )
+     C                   eval      cnd_rtnval = ' '
+     C     cnd_msg       dsply                   cnd_rtnval
+     C                   eval      cnd_rtnVal = uCase(cnd_rtnVal)
+ E02 C                   enddo
+     C                   eval      cnd_ptr = cnd_ptr + 1
+     C                   eval      cnd_array(cnd_ptr) = cnd_rtnVal
+ E01 C                   endif
+     C                   endsr
+     *--------------------------------------------------------------------
+     * initialize SQL.
+     *--------------------------------------------------------------------
+     C     srSQLInit     begsr
+     *
+ B01 C                   if        sqlInit = *off
+     C                   Eval      retCode = SQLAllocEnv(%addr(henv))
+     C                   Eval      retCode = SQLAllocConnect(henv: %addr(hdbc))
+     C                   Eval      retCode = SQLConnect(hdbc      :
+     C                                                  '*LOCAL'  :
+     C                                                  SQL_NTS   :
+     C                                                  *null     :
+     C                                                  SQL_NTS   :
+     C                                                  *null     :
+     C                                                  SQL_NTS   )
+     C                   Eval      cOptVal = SQL_COMMIT_NONE
+     C                   Eval      retCode = SQLSetConnectOption(hdbc          :
+     C                                                          SQL_ATTR_COMMIT:
+     C                                                          %addr(cOptVal) )
+     C                   Eval      retCode = SQLAllocStmt(hdbc       :
+     C                                                  %addr(hstmt) )
+     C                   eval      sqlInit = *on
+ E01 C                   endif
+     C                   endsr
+     *--------------------------------------------------------------------
+     * end SQL.
+     *--------------------------------------------------------------------
+     C     srSQLEnd      begsr
+ B01 C                   if        sqlInit = *on
+     C                   Eval      retCode = SQLFreeStmt(hstmt    :
+     C                                                   SQL_DROP )
+     C                   Eval      retCode = SQLDisconnect(hdbc)
+     C                   Eval      retCode = SQLFreeConnect(hdbc)
+     C                   Eval      retCode = SQLFreeEnv(henv)
+     C                   eval      sqlInit = *off
+ E01 C                   endif
+     C                   endsr
+     *--------------------------------------------------------------------
+     * error handler
+     *--------------------------------------------------------------------
+     C     *pssr         begsr
+ B01 C                   if        errFLag = *off
+     C                   eval      errFlag = *on
+     C                   exsr      srSQLEnd
+ E01 C                   endif
+     C                   endsr     '*CANCL'
+     Oqxxxsrc   e            write_one
+     O                       srcSeqno             6
+     O                                           12 '000000'
+     O                       xmlcode            112
+     *--------------------------------------------------------------------
+     * Read element
+     *--------------------------------------------------------------------
+    P readElement...
+    P                 B
+     *
+     D readElement     PI                        like(bldexc)
+     D  i_element                     9A   value varying
+     *
+     D i               S             10I 0 inz
+     D value           S                   like(bldexc ) inz
+     D endTag          S                   like(xmlTag2) inz
+     *
+     C                   eval      i = 1
+     C                   eval      endTag = '</' + i_element + '>'
+ B01 C                   dow       xmltag2 <> endTag
+     C                   eval      %subst(value: i: %len(xmlcode)) = xmlcode
+     C                   eval      i = i + %len(xmlcode)
+    C                   read      xmlinput
+ E01 C                   enddo
+     *
+     C                   Return    value
+     *
+    P readElement...
+    P                 E
+     *--------------------------------------------------------------------
+     * Double quotes
+     *--------------------------------------------------------------------
+    P dblQuotes...
+    P                 B
+     *
+     D dblQuotes       PI          2048A         varying
+     D  i_string                   2048A   value varying
+     *
+     D x               S             10I 0         inz
+     D string          S           2048A   varying inz
+     *
+ B01 C                   For       x = 1 to %len(i_string)
+     C                   Eval      string = string + %subst(i_string: x:1)
+ B02 C                   If        %subst(i_string: x : 1) = qs
+     C                   Eval      string = string + qs
+ E02 C                   Endif
+ E01 C                   Endfor
+     *
+     C                   Return    string
+     *
+    P dblQuotes...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  Get Attribute Data from String
+     *---------------------------------------------------------------------------------------------
+    P getAttrData...
+    P                 B
+     *
+     D getAttrData...
+     D                 PI          2000A          varying                       like(string_t)
+     D  i_attr                       10a   value
+     D  i_string                   2000A   value  varying                       like(string_t)
+     D  i_default                  2000A   value  varying                       like(string_t)
+     *
+     *  return value
+     D attrData        S           2000A   varying inz                          like(string_t)
+     *
+     *  local fields
+     D attr            S             20a   varying inz
+     D lenAttr         S             10i 0 inz
+     D aa              S             10i 0 inz
+     D cc              S             10i 0 inz
+     *
+     D Qd              C                   const('"')
+     *-------------------------------------------------------------------*
+     *
+     *  find the keyword
+     C                   eval      attr = %trim(i_attr) + '=' + Qd
+     *
+     C                   eval      aa   = %scan(attr: i_string)
+ B01 C                   if        aa = 0
+     C                   return    i_default
+ E01 C                   endif
+     *
+     C                   eval      aa   = aa + %len(attr)
+     C                   eval      cc   = %scan(Qd: i_string: aa+1)
+     *
+     *  return the data between the double-quotes
+ B01 C                   if        (cc-aa) > 0
+     C                   eval      attrData = %subst(i_string: aa: cc-aa)
+ E01 C                   endif
+     *
+     C                   Return    attrData
+     *
+    P getAttrData...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  Load condition array
+     *---------------------------------------------------------------------------------------------
+    P loadConditions...
+    P                 B
+     *
+     D loadConditions...
+     D                 PI                  dim(32) like(condition)
+     D  i_conditions                128A   value
+     *
+     *  return value
+     D cnd_array       s                   dim(32) inz like(condition)
+     D pValue          s               *   inz
+     D x               s             10i 0 inz
+     *-------------------------------------------------------------------*
+     C                   eval      i_conditions = uCase(i_conditions)
+     *
+     C                   eval      pValue = strtok(i_conditions: ';')
+ B01 C                   dow       pValue <> *null
+     C                   eval      x = x + 1
+     C                   eval      cnd_array(x) = %str(pValue)
+     C                   eval      pValue = strtok(*null: ';')
+ E01 C                   enddo
+     *
+     C                   Return    cnd_array
+    P loadConditions...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  Check for a condition
+     *---------------------------------------------------------------------------------------------
+    P isCondition...
+    P                 B
+     *
+     D isCondition...
+     D                 PI              n
+     D  i_condList                 2000A   value
+     *
+     *  return value
+     D isCondition     S               n   inz
+     D pValue          S               *   inz
+     D aCondition      S             10a   inz
+     *-------------------------------------------------------------------*
+     C                   eval      i_condList = uCase(i_condList)
+     *
+ B01 C                   if        (i_condList = '*NONE')  or
+     C                             (i_condList = ''     )
+     C                   eval      *in01 = *on
+ X01 C                   else
+     *
+     C                   eval      pValue = strtok(i_condList: ' ')
+ B02 C                   dow       pValue <> *null
+     C                   eval      aCondition = %str(pValue)
+     C     aCondition    lookup    cnd_array                              01
+ B03 C                   if        not *in01
+     C                   leave
+ E03 C                   endif
+     C                   eval      pValue = strtok(*null     : ' ')
+ E02 C                   enddo
+     *
+ E01 C                   endif
+     *
+ B01 C                   if        *in01
+     C                   eval      isCondition = *on
+ X01 C                   else
+     C                   eval      isCondition = *off
+ E01 C                   endif
+     *
+     C                   Return    isCondition
+    P isCondition...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  Check the release level
+     *---------------------------------------------------------------------------------------------
+    P isRelease...
+    P                 B
+     *
+     D isRelease...
+     D                 PI              n
+     D  i_release                    10A   value
+     *
+     *  return value
+     D isRelease       S               n   inz(*off)
+     *
+     *  QSZRTVPR API
+     D QSZRTVPR...
+     D                 PR                  extpgm('QSZRTVPR')
+     D  o_rcvVar                  65535A          options(*varsize)
+     D  i_lenRcvVar                  10I 0 const
+     D  i_format                      8A   const
+     D  o_prodInf                 65535A   const  options(*varsize)
+     D  io_errCode                65535A          options(*varsize)
+     *
+     D prdi0100        DS                  qualified
+     D  productID              1      7A   inz('*OPSYS')
+     D  releaseLvl             8     13A   inz('*CUR'  )
+     D  productOpt            14     17A   inz('0000'  )
+     D  loadID                18     27A   inz('*CODE' )
+     *  Shortened!:
+     D prdr0100        DS                  qualified
+     D  bytRet                 1      4I 0
+     D  bytAvl                 5      8I 0
+     D  reserved_1             9     12I 0
+     D  productID             13     19A
+     D  releaseLvl            20     25A
+     *  API error code
+     D errCode         DS
+     D  bytPrv                       10i 0 inz(0)
+     D  bytAvl                       10i 0 inz(0)
+     *  Release
+     D release         DS
+     D  r_operator             1      3a
+     D  r_space                4      4a
+     D  r_level                5     10a
+     *-------------------------------------------------------------------*
+ B01 C                   If        i_release = '*CURRENT'
+     C                   Eval      isRelease = *on
+ X01 C                   Else
+     C                   Eval      release = i_release
+     C                   Callp     QSZRTVPR(prdr0100: %size(prdr0100):
+     C                                      'PRDR0100': prdi0100: errCode)
+ B02 C                   Select
+     C                   When      r_operator = '*LT' and
+     C                             prdr0100.releaseLvl < i_release
+     C                   Eval      isRelease = *on
+     C                   When      r_operator = '*EQ' and
+     C                             prdr0100.releaseLvl = i_release
+     C                   Eval      isRelease = *on
+     C                   When      r_operator = '*GT' and
+     C                             prdr0100.releaseLvl > i_release
+     C                   Eval      isRelease = *on
+     C                   When      r_operator = '*LE' and
+     C                             prdr0100.releaseLvl <= i_release
+     C                   Eval      isRelease = *on
+     C                   When      r_operator = '*GE' and
+     C                             prdr0100.releaseLvl >= i_release
+     C                   Eval      isRelease = *on
+ X02 C                   Other
+     C                   Eval      isRelease = *off
+ E02 C                   Endsl
+ E01 C                   Endif
+     *
+     C                   Return    isRelease
+    P isRelease...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  Replaces the value of a given keyword.
+     *---------------------------------------------------------------------------------------------
+    P setTargetRelease...
+    P                 B
+     *
+     D setTargetRelease...
+     D                 PI          2000A          varying
+     D  i_keyword                    10A   value  varying
+     D  i_string                   2000A   value  varying
+     D  i_value                      10A   value  varying
+     *
+     *  return value
+     D string          S           2000A   varying inz
+     *
+     *  helper fields
+     D x               S             10I 0 inz
+     D l               S             10I 0 inz
+     D tmpKeyword      S                   like(i_keyword) inz
+     D tmpString       S                   like(i_string ) inz
+     D tmpCmd          S             10A   inz
+     *-------------------------------------------------------------------*
+      /FREE
+         tmpKeyword = uCase(%trimR(i_keyword));
+         tmpString  = uCase(%trimR(i_string ));
+         x = %scan(' ': tmpString);
+ B01     if x = 0;
+            return i_string;
+ E01     endif;
+         tmpCmd = %subst(tmpString: 1: x);
+ B01     if tmpCmd <> 'CRTRPGMOD' and
+            tmpCmd <> 'CRTRPGPGM' and
+            tmpCmd <> 'CRTCLMOD'  and
+            tmpCmd <> 'CRTCLPGM'  and
+            tmpCmd <> 'CRTCBLMOD' and
+            tmpCmd <> 'CRTCBLPGM' and
+            tmpCmd <> 'CRTCMOD'   and
+            tmpCmd <> 'CRTCPPMOD' and
+            tmpCmd <> 'CRTBNDC'   and
+            tmpCmd <> 'CRTBNDCBL' and
+            tmpCmd <> 'CRTBNDCL'  and
+            tmpCmd <> 'CRTBNDCPP' and
+            tmpCmd <> 'CRTBNDDIR' and
+            tmpCmd <> 'CRTBNDRPG' and
+            tmpCmd <> 'CRTPGM'    and
+            tmpCmd <> 'CRTSRVPGM' ;
+            return i_string;
+ E01     endif;
+         x = %scan(tmpKeyword + '(': tmpString);
+ B01     if x = 0;
+            return %trimR(i_string) +
+                   ' ' + tmpKeyword + '(' + %trimR(i_value) + ')';
+ E01     endif;
+         l = %scan(')': tmpString: x + %len(i_keyword) + 1);
+ B01     if l = 0;
+            return i_string;
+ E01     endif;
+         l = l - x + 1;
+         string = %replace(tmpKeyword + '(' + %trimR(i_value) + ')'
+                           : i_string: x: l);
+         Return string;
+      /END-FREE
+     *
+    P setTargetRelease...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  Store field value.
+     *---------------------------------------------------------------------------------------------
+    P setVariable...
+    P                 B
+     *
+     D setVariable...
+     D                 PI
+     D  i_fldName                    10A   value  varying
+     D  i_value                      64A   value  varying
+     D i               s             10I 0 inz
+     *-------------------------------------------------------------------*
+      /FREE
+ B01     if (i_fldName = '');
+            return;
+ E01     endif;
+ B01     for i = 1 to fld_x;
+ B02        if (uCase('&' + %trim(i_fldName)) = uCase(fld_name(fld_x)));
+               fld_value(fld_x) = i_value;
+               leave;
+ E02        endif;
+ E01     endfor;
+ B01     if (fld_x >= %elem(fld_name));
+            return;
+ E01     endif;
+         fld_x = fld_x + 1;
+         fld_name(fld_x)  = uCase('&' + %trim(i_fldName));
+         fld_value(fld_x) = i_value;
+      /END-FREE
+     *
+    P setVariable...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  get variable name from statement.
+     *---------------------------------------------------------------------------------------------
+    P getVarName...
+    P                 B
+     *
+     D getVarName...
+     D                 PI            11a          varying
+     D  i_bldexc                           value  like(bldexc)
+     D  i_pos                        10i 0 value
+     D name            s             11a   varying inz
+     D CHARS           c                   '&ABCDEFGHIJKLMNOPQRSTUVWXYZ+
+     D                                      1234567890_'
+     *-------------------------------------------------------------------*
+      /FREE
+ B01     dow (i_pos<=%len(i_bldexc) and
+              %check(CHARS:%subst(i_bldexc:i_pos:1))=0);
+            name = name+%subst(i_bldexc:i_pos:1);
+            i_pos=i_pos+1;
+ E01     enddo;
+         return name;
+      /END-FREE
+     *
+    P getVarName...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  get variable value.
+     *---------------------------------------------------------------------------------------------
+    P getVarValue...
+    P                 B
+     *
+     D getVarValue...
+     D                 PI            64a          varying
+     D  i_name                       11a   value  varying
+     D i               s             10i 0 inz
+     D value           s             64a   varying inz
+     *-------------------------------------------------------------------*
+      /FREE
+ B01     for i=1 to fld_x;
+ B02        if (ucase(fld_name(i))=uCase(i_name));
+               value=%trimR(fld_value(i));
+               leave;
+ E02        endif;
+ E01     endfor;
+         return value;
+      /END-FREE
+     *
+    P getVarValue...
+    P                 E
+     *---------------------------------------------------------------------------------------------
+     *  convert to upper case
+     *---------------------------------------------------------------------------------------------
+    P uCase...
+    P                 B
+     *
+     D uCase...
+     D                 PI          2000A          varying
+     D  i_string                   2000A   value  varying
+     D uCase           s           2000A   inz varying
+     D LC              C                   const('abcdefghijklmnopqrstuvwxyz')
+     D UC              C                   CONST('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+     *-------------------------------------------------------------------*
+      /FREE
+         uCase = %xlate(LC:UC:i_string);
+         return uCase;
+      /END-FREE
+     *
+    P uCase...
+    P                 E
+     * /// END   OF INSTALL PGM HERE   ****************************************** ///
+     * /// do not copy past this point ///
+]]>  </install_program>
+<qcmdexc condition="*NONE" release="*CURRENT" dltsplf="*NONE"><![CDATA[
+DLTCMD CMD(&tolib/DSPDTAQ)
+]]>  </qcmdexc>
+<sendmsg  sendmsgid="CPF9897" sendmsgtype = "*STATUS   "><![CDATA[
+Installing DSPDTAQD  type DSPF - in progress.
+]]>  </sendmsg>
+<!-- START OF MEMBER  -->
+<mbr
+mbrname =  "DSPDTAQD  "
+mbrtype =  "DSPF      "
+mbrtext =  "Display data queue entries                     jcr"
+srcfile =  "QDSPDTAQ  "
+srclib  =  "selected  "
+srclen  =  "00112"
+srccssid=  "00273">
+<copysrc><![CDATA[
+      *----------------------------------------------------------------
+      * DSPDQE - Display Data Queue Entries
+      * By   Craig Rutledge,  6/11/93
+      *----------------------------------------------------------------
+ RAD  * >>PRE-COMPILER<<
+ RAD  *
+ RAD  *   >>CRTCMD<< CRTDSPF      FILE(&LI/&OB) +
+ RAD  *                           SRCFILE(&SL/&SF) +
+ RAD  *                           SRCMBR(&SM);
+ RAD  *
+ RAD  *   >>COMPILE<<
+ RAD  *   >>END-COMPILE<<
+ RAD  *
+ RAD  *   >>EXECUTE<<
+ RAD  *
+ RAD  * >>END-PRE-COMPILER<<
+ RAD  * ---------------------------------------------------------------
+     A                                      DSPSIZ(24 80 *DS3)
+     A                                      CA03
+     A                                      CA05
+     A                                      CA10
+     A                                      CA11
+     A                                      CA12
+     A                                      CA19
+     A                                      CA20
+     A                                      PRINT
+     A          R HEADER
+     A                                  1  2'DSPDQE '
+     A                                      COLOR(BLU)
+     A                                  1 25'Display Data Queue Entries'
+     A                                      DSPATR(HI)
+     A                                      DSPATR(UL)
+     A                                      COLOR(BLU)
+     A                                  1 62'jcr'
+     A                                      COLOR(BLU)
+     A                                  1 72DATE
+     A                                      EDTWRD('0  /  /  ')
+     A                                      COLOR(BLU)
+     A                                  2  2'Name:'
+     A            VQNAME        10A  O  2  8DSPATR(HI)
+     A                                  2 19'Lib:'
+     A            VQLIB         10A  O  2 24DSPATR(HI)
+     A                                  2 35'Len:'
+     A            VLEN           5Y 0O  2 40EDTCDE(4)
+     A                                      DSPATR(HI)
+     A                                  2 48'Seq:'
+     A            VACSTYPE      10A  O  2 53DSPATR(HI)
+     A                                  2 72SYSNAME
+     A                                      COLOR(BLU)
+     A                                  3 18'Text:'
+     A            QTEXT         50A  O  3 24DSPATR(HI)
+     A                                  4  2'Date    '
+     A                                      DSPATR(UL)
+     A                                      DSPATR(HI)
+     A                                  4 11'Time    '
+     A                                      DSPATR(UL)
+     A                                      DSPATR(HI)
+     A            VRULER        58A  O  4 21DSPATR(HI)
+     A                                      DSPATR(UL)
+     A          R DATA1                     SFL
+     A            QUDATE         8A  O  5  2
+     A            QUTIME         8A  O  5 11
+     A            VIEWQ1        58A  O  5 21
+     A            VIEWQ2        58A  O  6 21
+      *
+     A          R CONTRL1                   SFLCTL(DATA1)
+      *%%TS  SD  20011204  123500  RUTLEDGEC   REL-V4R4M0  5769-PW1
+     A                                      SFLSIZ(0700)
+     A                                      SFLPAG(0007)
+     A                                      OVERLAY
+     A  03                                  SFLDROP(CA13)
+     A N03                                  SFLFOLD(CA13)
+     A  01                                  SFLDSP
+     A  02                                  SFLDSPCTL
+     A N01                                  SFLCLR
+     A N06                                  SFLEND(*MORE)
+     A                                      SFLMODE(&VSFLMODE)
+     A            VSFLMODE       1A  H
+     A            VSRECNUM       4S 0H      SFLRCDNBR
+     A                                 20  2'                                  -
+     A                                                                         -
+     A                                               '
+     A                                      DSPATR(UL)
+     A  20                             21  2'Position to screen:'
+     A  20        VDSPNUM        3Y 0B 21 23EDTCDE(4)
+     A                                      DSPATR(HI)
+     A  20        VSCRNNUM       3Y 0O 21 28EDTCDE(4)
+     A  20                             21 32'Screens'
+     A            VQTOTCNT       7Y 0O 21 49EDTCDE(4)
+     A                                 21 57'Total Queue Entries'
+     A                                 22  2'Shift to column:'
+     A  01        VDSPPOS        5Y 0B 22 21EDTCDE(4)
+     A                                      DSPATR(HI)
+     A  01        VPOS           3Y 0O 22 28EDTCDE(4)
+     A  01                             22 32'Current column'
+     A            VQENTNUM       7Y 0O 22 49EDTCDE(4)
+     A                                 22 57'Retrieved by API'
+     A                                 23  2'F3=Exit'
+     A                                      COLOR(BLU)
+     A                                 23 17'F5=Refresh'
+     A                                      COLOR(BLU)
+     A                                 23 32'F10=Hex'
+     A                                      COLOR(BLU)
+     A                                 23 45'F11=UnFold/Fold'
+     A                                      COLOR(BLU)
+     A                                 23 64'F12=Cancel'
+     A                                      COLOR(BLU)
+     A N01                             24  2'No Entries are currently in data q-
+     A                                      ueue.'
+     A                                      DSPATR(HI)
+     A                                      DSPATR(RI)
+     A                                 24 45'F19=Shift Left'
+     A                                      COLOR(BLU)
+     A                                 24 64'F20=Shift Right'
+     A                                      COLOR(BLU)
+]]>  </copysrc>
+</mbr>
+<compile  condition="*NONE"><![CDATA[
+CRTDSPF FILE(&tolib/DSPDTAQD) SRCFILE(&tolib/QDSPDTAQ)
+]]>  </compile>
+<sendmsg  sendmsgid="CPF9897" sendmsgtype = "*STATUS   "><![CDATA[
+Installing DSPDTAQP  type PNLGRP - in progress.
+]]>  </sendmsg>
+<!-- START OF MEMBER  -->
+<mbr
+mbrname =  "DSPDTAQP  "
+mbrtype =  "PNLGRP    "
+mbrtext =  "Display data queue entries - help text         jcr"
+srcfile =  "QDSPDTAQ  "
+srclib  =  "selected  "
+srclen  =  "00112"
+srccssid=  "00273">
+<copysrc><![CDATA[
+.*-------------------------------------------------------------------*
+.* DSPDQEH - Display Data Queue Entries - Help Text                  *
+.* By   Craig Rutledge, 06/11/93                                     *
+.*-------------------------------------------------------------------*
+.* >>PRE-COMPILER<<
+.*
+.*   >>CRTCMD<< CRTPNLGRP    PNLGRP(&LI/&OB) +
+.*                           SRCFILE(&SL/&SF) +
+.*                           SRCMBR(&SM);
+.*
+.*   >>COMPILE<<
+.*   >>END-COMPILE<<
+.*
+.*   >>EXECUTE<<
+.*
+.* >>END-PRE-COMPILER<<
+.*-------------------------------------------------------------------*
+:PNLGRP.
+:HELP NAME='DSPDQE'.
+Display Data Queue Entries (DSPDQE) - Help
+:P.
+The Display Data Queue Entries (DSPDQE) command allows you to view data
+queue entries with no possibility of data loss or entry resequencing.
+
+:P.The command executes a system API to access the data queue entries
+as messages and loads them into a subfile.
+.*
+:P.Please be aware of the following limitations.
+1). There can (possibly) be more entries in the dataq than the API can retrieve.
+Divide 12M by length of your data queue and you can get a fairly good
+idea of max number of entries that can be displayed.   2). The program
+will only show the first 9,999 (max subfile size) number of entries.
+These are not usually a problem.
+.*--------------------------------------------------------------------
+:LINES.
+The objects used by this command are:
+DSPDTAQ    *CMD             Command Prompt
+DSPDTAQR   *PGM    RPGLE    Entry viewer
+DSPDTAQD   *FILE   DSPF
+DSPDTAQP   *PNLGRP          Help Text
+DSPDTAQRV  *PGM    RPGLE    Validity checker
+:ELINES.
+:EHELP.
+.*--------------------------------------------------------------------
+.* HELP TEXT FOR FILE NAME.
+.*--------------------------------------------------------------------
+:HELP name='DSPDQE/DTAQ'.
+Data Queue - Help
+:XH3.Data Queue (FILE)
+:P.Specifies the name and library of the dataq to be selected.
+.*
+:PARML.
+:PT.data-queue-name
+:PD.Enter the name of the dataq whose entries you wish to display.
+.*
+:PT.:PK def.*LIBL:EPK.
+:PD.The system searches the library list to find the library where the
+dataq is located.
+.*
+:PT.library-name
+:PD.Enter the name of the library where the dataq is located.
+:EPARML.
+:EHELP.
+:EPNLGRP.
+]]>  </copysrc>
+</mbr>
+<compile  condition="*NONE"><![CDATA[
+CRTPNLGRP PNLGRP(&tolib/DSPDTAQP) SRCFILE(&tolib/QDSPDTAQ)
+]]>  </compile>
+<sendmsg  sendmsgid="CPF9897" sendmsgtype = "*STATUS   "><![CDATA[
+Installing DSPDTAQR  type RPGLE - in progress.
+]]>  </sendmsg>
+<!-- START OF MEMBER  -->
+<mbr
+mbrname =  "DSPDTAQR  "
+mbrtype =  "RPGLE     "
+mbrtext =  "Display data queue entries  (using user space) jcr"
+srcfile =  "QDSPDTAQ  "
+srclib  =  "selected  "
+srclen  =  "00112"
+srccssid=  "00273">
+<copysrc><![CDATA[
+     H DFTACTGRP(*NO) ACTGRP(*CALLER) BNDDIR('QC2LE') EXPROPTS(*RESDECPOS)
+     H DATFMT(*ISO)   TIMFMT(*ISO)    OPTION(*NODEBUGIO)
+      *----------------------------------------------------------------
+      * DSPDQER  - Display Data Queue Entries                     v4r2
+      * Copyright (C) 06/11/1993  Craig Rutledge   <craig_rutledge§mohawkind.com>
+      * This program is free software, you can redistribute it and/or modify it under the terms
+      * of the GNU General Public License as published by the Free Software Foundation.
+      * --------
+      *
+      * 5/7/2001 V2 - rewrite.  Replace DMPOBJ logic with API to do
+      * non-destructive display of dataq entries as messages.
+      *
+      * Thanks to Dennis Lovelady (www.lovelady.com) this program now uses
+      * a user space as a retrieve variable.  Not quite a documented
+      * feature, but it works| Now you can retrieve up to 12Meg of entries.
+      * If this technique causes anyone problems, please advise me.
+      *
+      * I do NOT understand 1) why IBM made this API so radically different
+      * than the normal qrcvdatq call.  2) why in heck they didn't make
+      * this a user space api or at least give a continuation handle so
+      * I could get all entries.  Almost makes you want to learn Unix.
+      * 6/25/2001 - scan through entries before they are sent to screen to make sure no
+      * hex data less than x'40' is embedded.
+      * 11/09/2001 - Thomas Raddatz: Changed F4 to F11 to unfold/fold subfile.
+      *                              Added hexadecimal display mode.
+      *                              Added data column offset.
+      * 12/05/2001 - Craig Rutledge: Subfile remains on same screen during Fkeys.
+      *                              Added F19-column shift left
+      *                              Added F20-column shift right
+      * PTF note:  Api qmhrdqm requires PTF
+      * sf63313 v4r2, sf63312 v4r3, sf62994 v4r4, sf63182 v5r1
+      * be installed on your system to view keyed data queue entrys.
+      *----------------------------------------------------------------
+      * Program Summary:
+      * Call API to retrieve data queue object description
+      * Extract entries and load to subfile
+      * Display subfile
+      *----------------------------------------------------------------
+      * API (application program interfaces) used:
+      * QMHQRDQD  display data queue object description
+      * QMHRDQM   retrieve dataq entries
+      *----------------------------------------------------------------
+      * >>PRE-COMPILER<<                                                                      RADDAT
+      *                                                                                       RADDAT
+      *   >>CRTCMD<< CRTBNDRPG    PGM(&LI/&OB) +                                              RADDAT
+      *                           SRCFILE(&SL/&SF) +                                          RADDAT
+      *                           SRCMBR(&SM);                                                RADDAT
+      *                                                                                       RADDAT
+      *   >>COMPILE<<                                                                         RADDAT
+      *     >>PARM<< TRUNCNBR(*NO);                                                           RADDAT
+      *     >>PARM<< DBGVIEW(*LIST);                                                          RADDAT
+      *     >>PARM<< DFTACTGRP(*YES);                                                         RADDAT
+      *   >>END-COMPILE<<                                                                     RADDAT
+      *                                                                                       RADDAT
+      *   >>EXECUTE<<                                                                         RADDAT
+      *                                                                                       RADDAT
+      * >>END-PRE-COMPILER<<                                                                  RADDAT
+      * ---------------------------------------------------------------                       RADDAT
+     Fdspdtaqd  cf   e             workstn sfile(data1:rrn1)                                  RADDAT
+     F                                     infds(dsinf)
+      *----------------------------------------------------------------
+      *  allow subfile to stay on current screen
+     D dsinf           ds
+     D   bgrrn               378    379i 0
+     D bgrrnsav        s                   like(bgrrn)
+      *
+     D rrn1            s              5u 0
+     D torecNum        s              5u 0
+     D aa              s              5u 0 inz
+     D ff              s              5u 0 inz
+     D mvr             s              5u 0 inz
+     D Shift           s              5u 0 inz(58)
+     D hex40           s              1    inz(x'40')
+     D cSflPag         c                   const(7)
+     D sflDspPag       s             10I 0
+      *
+      *----------------------------------------------------------------
+      * Define parms for QMHQRDQD retrieve dataq description.
+      *----------------------------------------------------------------
+     D qrcvar          ds                  inz
+     D  qMsgLength                   10i 0 overlay(qrcvar:9)
+     D  qKeyLength                   10i 0 overlay(qrcvar:13)
+     D  qAccessTyp            17     17
+     D  qText                 20     69
+     D  qTrimLen                     10i 0 inz
+     D v0200len        s             10i 0
+     D ExitPgmFlg      s              1    inz(*off)
+      *
+      *----------------------------------------------------------------
+      * Define parms for QMHRDQM retrieve dataq entries
+      *----------------------------------------------------------------
+     D vrcvar          ds                  based(uheadptr)
+     D vBytesReturned                10i 0 overlay(vrcvar:1)
+     D vBytesAvail                   10i 0 overlay(vrcvar:5)
+     D vNumMsgRtn                    10i 0 overlay(vrcvar:9)
+     D vNumMsgAvl                    10i 0 overlay(vrcvar:13)                                      d
+     D vKeyLenRtn                    10i 0 overlay(vrcvar:17)
+     D vKeyLenAvl                    10i 0 overlay(vrcvar:21)
+     D vMsgTxtRtn                    10i 0 overlay(vrcvar:25)
+     D vMsgTxtAvl                    10i 0 overlay(vrcvar:29)
+     D vEntryLenRtn                  10i 0 overlay(vrcvar:33)
+     D vEntryLenAvl                  10i 0 overlay(vrcvar:37)
+     D vOffset1stEnt                 10i 0 overlay(vrcvar:41)
+     D vQLib                         10    overlay(vrcvar:45)
+     D vMessageData               32767    varying                                            RADDAT
+     D uheadptr        s               *   inz(*null)
+      *
+      *      ---------------------------------------------------------------------------------------
+      *      Move pointer through message entries
+      *      ---------------------------------------------------------------------------------------
+     D vListEntry      ds                  based(vListPtr)
+     D   vNextEntry                  10i 0
+     D   vDateTime                    8                                         TOD format
+     D   vMsgVar                  32767                                         variable text RADDAT
+      *
+      *      ---------------------------------------------------------------------------------------
+      *      Message selection info - RDQS0100 nonkeyed queues  RDQS0200 Keyed data queues
+      *      ---------------------------------------------------------------------------------------
+     D vRDQS0100       ds
+     D   v1Selection                  1    inz('A')                             all
+     D   v1Reserved                   3
+     D   v1MsgByteRtv                10i 0 inz   overlay(vRDQS0100:5)           message bytes to rtv
+      *
+     D vRDQS0200       ds
+     D   v2Selection                  1    inz('K')                             Keyed
+     D   v2KeyOrder                   2    inz('GE')
+     D   v2MsgByteRtv                10i 0 inz   overlay(vRDQS0200:5)           message bytes to rtv
+     D   v2KeyByteRtv                10i 0 inz   overlay(vRDQS0200:9)           keys bytes to rtv
+     D   v2KeyLen                    10i 0 inz   overlay(vRDQS0200:13)          key length
+     D   v2Key                      256          overlay(vRDQS0200:17)          key value
+      *
+      *----------------------------------------------------------------
+      * get entry date and time from API
+      *----------------------------------------------------------------
+     D dtDS            ds            16                                         extract C YYMMDD
+     D  dtFiller                      1
+     D  dtMDY                         6
+     D  dtTIME                        6
+      *
+      *----------------------------------------------------------------
+      * Divide entry up into subfile fields
+      *----------------------------------------------------------------
+     D ViewqDS         ds
+     D   Viewq1
+     D   Viewq2
+     D TempqDS         s            116a
+     D isHexMode       s               n   inz(*off)
+     D ofs             s             10i 0 inz
+     D ColumnShift     s             10i 0 inz
+     D x               s             10i 0 inz
+     D cRuler1         c                   const('....+....1....+....2+
+     D                                            ....+....3....+....4+
+     D                                            ....+....5....+....6+
+     D                                            ....+....7....+....8+
+     D                                            ....+....9....+....0+
+     D                                            ....+....1....+....2+
+     D                                            ....+....3....+....4+
+     D                                            ....+....5....+....6+
+     D                                            ....+....7....+....8+
+     D                                            ....+....9....+....0+
+     D                                            ....+....1....+....2')
+     D cRuler2         c                   const('. . . . + . . . . 1 +
+     D                                            . . . . + . . . . 2 +
+     D                                            . . . . + . . . . 3 +
+     D                                            . . . . + . . . . 4 +
+     D                                            . . . . + . . . . 5 +
+     D                                            . . . . + . . . . 6 +
+     D                                            . . . . + . . . . 7 +
+     D                                            . . . . + . . . . 8 +
+     D                                            . . . . + . . . . 9 +
+     D                                            . . . . + . . . . 0 +
+     D                                            . . . . + . . . . 1 +
+     D                                            . . . . + . . . . 2 +
+     D                                            . . . . + . . . . 3 +
+     D                                            . . . . + . . . . 4 +
+     D                                            . . . . + . . . . 5 +
+     D                                            . . . . + . . . . 6 +
+     D                                            . . . . + . . . . 7 +
+     D                                            . . . . + . . . . 8 +
+     D                                            . . . . + . . . . 9 +
+     D                                            . . . . + . . . . 0 ')
+      *
+      *----------------------------------------------------------------
+      * Error return code parm for APIs.
+      *----------------------------------------------------------------
+     D vApiErrDs       ds
+     D  vbytpv                       10i 0 inz(%size(vApiErrDs))                bytes provided
+     D  vbytav                       10i 0 inz(0)                               bytes returned
+     D  vmsgid                        7                                         error msgid
+     D  vresvd                        1                                         reserved
+     D  vrpldta                      50a                                        replacement data
+      *
+      *---------------------------------------------------------------------------------------------
+      * Create Prototypes for calls
+      *---------------------------------------------------------------------------------------------
+     D qwccvtdt        PR                  ExtPgm('QWCCVTDT')                   api date converter
+     D                               10    const                                FROM FORMAT
+     D                                8                                         API DATE STAMP
+     D                               10    const                                TO FORMAT
+     Dd                                    like(dtDS)                           TO DATE
+     Db                                    like(vApiErrDS)                      error parm
+      *    -------------------------------------------------------------
+     D qmhqrdqd        PR                  ExtPgm('QMHQRDQD')                   data q description
+     Db                                    like(qrcvar)                         RECIEVER
+     D                               10i 0 const                                LENGTH
+     D                                8    const                                FORMAT
+     Dd                              20                                         Q NAME & LIB
+      *    -------------------------------------------------------------
+     D qmhrdqm         PR                  ExtPgm('QMHRDQM ')                   get q entry
+     Db                                    like(vrcvar)                         RECIEVER
+     D                                       Options(*varsize)
+     D                               10i 0 const                                LENGTH
+     D                                8    const                                FORMAT
+     D                               20                                         Q NAME & LIB
+     Db                                    like(vRDQS0200) Options(*varsize)    KEY INFORMATION
+     D                                        const
+     D                               10i 0 const                                KEY INFO LENGTH
+     D                                8    const                                INFORMATION
+     Db                                    like(vApiErrDS) Options(*varsize)    error data structure
+      *    -------------------------------------------------------------
+     D quscrtus        PR                  ExtPgm('QUSCRTUS')                   create user space
+     D                               20                                         Space Name
+     D                               10    const                                Extended Attrb
+     D                               10i 0 const                                length of space
+     D                                1    const                                Hex0Init
+     D                               10    const                                Use Authority
+     D                               50    const                                text
+     D                               10    const                                replace object
+     Db                                    like(vApiErrDS)                      error parm
+      *    -------------------------------------------------------------
+     D uSpaceName      s             20    inz('JCRCMDS   QTEMP     ')
+     D qusptrus        PR                  ExtPgm('QUSPTRUS')                   retrieve pointer
+     D                               20                                         Space Name
+     D                                 *                                        pointer
+     Db                                    like(vApiErrDS)                      error parm
+      *    -------------------------------------------------------------
+     D cvthc           PR                  ExtProc('cvthc')                     Cvt. Hex to Char
+     D  i_receiver                     *   value
+     D  i_source                       *   value
+     D  i_numSrcNib                  10i 0 value
+      *    -------------------------------------------------------------
+     D main            PR                  extpgm('DSPDQER ')
+     D  i_qnamlib                    20A                                        NAME LIB 20
+     D  i_qobjtyp                    10A
+      *    -------------------------------------------------------------
+     D main            PI
+     D  i_qnamlib                    20A
+     D  i_qobjtyp                    10A
+      *---------------------------------------------------------------------------------------------
+     C                   eval      vqname=%subst(i_qnamlib:1:10)
+     C                   eval      vSflMode = *on
+     C                   eval      *in03    = vSflMode                          subfile mode
+     C                   eval      vpos     = 1
+      *
+      * create object list user space
+     C                   callp     QUSCRTUS(                                    CREATE USER SPC
+     C                             uSpaceName:                                  CREATE USER SPC
+     C                             'TEST':                                      EXTENDED ATRIB
+     C                             13000000:                                    SIZE IN BYTES
+     C                             x'00':                                       INITIAL VALUE
+     C                             '*ALL':                                      AUTHORITY
+     C                             'List Objects  ':                            TEXT
+     C                             '*NO ':                                      REPLACE OBJ
+     C                             vApiErrDs)                                   ERROR
+      *
+      * Get pointer to object list user spaces
+     C                   callp     QUSPTRUS(                                    GET POINTER TO SPACE
+     C                             uSpaceName:                                  SPACE    LIB
+     C                             uHeadPtr:                                    pointer to header
+     C                             vApiErrDs)                                   error
+      *
+      * Call API to retrieve data queue description.
+     C                   callp     QMHQRDQD(
+     C                             qrcvar:                                      DATA STRUCT
+     C                             %size(qrcvar):                               SIZE
+     C                             'RDQD0100':                                  TYPE FORMAT
+     C                             i_qnamlib)                                   NAME LIB
+      *
+      * Setup a looping subroutine so user can refresh screen
+ B01 C                   dou       ExitPgmFlg=*on
+     C                   exsr      RefreshScreen
+ E01 C                   enddo
+     C                   eval      *inlr = *on                                  PROGRAM END
+     C                   return
+      *
+      *----------------------------------------------------------------
+      * Call API to retrieve data queue entries
+      *   Different type dataqs require a different parm list to the API.
+      *----------------------------------------------------------------
+     C     RefreshScreen begsr
+ B01 C                   if        qAccessTyp ='K'                              keyed
+     C                   eval      vacsType = '*KEYED'
+     C                   eval      v2MsgByteRtv = qMsgLength                    message bytes to rtv
+     C                   eval      v2KeyByteRtv = qKeyLength                    keys bytes to rtv
+     C                   eval      v2KeyLen = qKeyLength                        keys length to rtv
+     C                   eval      v0200Len=16+qKeyLength                       len of info
+     C                   callp     QMHRDQM(
+     C                             vrcvar:                                      return variable
+     C                             12000000:                                    len of return var
+     C                             'RDQM0200':                                  return format
+     C                             i_qnamlib:                                   NAME LIB
+     C                             vRDQS0200:                                   key information
+     C                             v0200Len:                                    key information leng
+     C                             'RDQS0200':                                  information format
+     C                             vApiErrDS)                                   error data structure
+ X01 C                   else
+      *  non keyed
+     C                   eval      vacsType = '*NON-KEYED'
+     C                   eval      v1MsgByteRtv = qMsgLength                    message bytes to rtv
+     C                   callp     QMHRDQM(
+     C                             vrcvar:                                      return variable
+     C                             12000000:                                    len of return var
+     C                             'RDQM0100':                                  return format
+     C                             i_qnamlib:                                   NAME LIB
+     C                             vRDQS0100:                                   key information
+     C                             %size(vRDQS0100):                            key information leng
+     C                             'RDQS0100':                                  information format
+     C                             vApiErrDS)                                   error data structure
+ E01 C                   endif
+      *
+      *---------------------------------------------------------------------------------------------
+      * Spin through the dataq entries.
+      *   Convert API date/time stamp to human-readable.
+      *     Load to subfile.
+      *---------------------------------------------------------------------------------------------
+     C                   clear                   rrn1
+ B01 C                   if        vNumMsgRtn >  0                              there are entries
+      *
+      *      ---------------------------------------------------------------------------------------
+      *      Move pointer through message entries
+      *      ---------------------------------------------------------------------------------------
+     C                   eval      vListPtr=uHeadPtr  + vOffset1stEnt           1st offset
+ B02 C                   do        vNumMsgRtn
+     C                   exsr      DecodeDate
+     C                   exsr      srTempqDS
+     C                   exsr      srDataToDsp
+     C                   eval      rrn1=rrn1+1
+     C                   write     data1
+ B03 C                   if        rrn1=9999                                    subfile full
+     C                   leave
+ E03 C                   endif
+     C                   eval      vListPtr=uHeadPtr  + vNextEntry
+ E02 C                   enddo
+ E01 C                   endif
+      *
+      *----------------------------------------------------------------
+      * Display subfile.  Calc number of screens in subfile.
+      *----------------------------------------------------------------
+     C                   eval      vSrecNum=1
+     C                   eval      ColumnShift=0
+     C                   eval      vlen          = qMsgLength
+     C                   eval      vqTotCnt      = vNumMsgAvl                   total number of entr
+ B01 C                   dou       1=2
+      *
+     C                   eval      x = ofs + 1
+ B02 C                   dow       x > 100
+     C                   eval      x = x - 100
+ E02 C                   enddo
+      *
+ B02 C                   if        isHexMode
+     C                   eval      vRuler = %subst(cRuler2: (x*2)-1)
+ X02 C                   else
+     C                   eval      vRuler = %subst(cRuler1: x)
+ E02 C                   endif
+      *
+ B02 C                   if        ofs = 0
+     C                   eval      %subst(vRuler: 1: 1) = '*'
+ E02 C                   endif
+      *
+ B02 C                   if        vSflMode = *on
+     C                   eval      sflDspPag = cSflPag * 2
+ X02 C                   else
+     C                   eval      sflDspPag = cSflPag
+ E02 C                   endif
+      *
+     C                   eval      vqentNum = rrn1                              # Q ENTRIES
+     C     rrn1          div       sflDspPag     vScrnNum                       # OF SCREENS
+     C                   mvr                     mvr
+ B02 C                   if        mvr>0                                        OVERFLOW SCREENS
+     C                   eval      vScrnNum =  vScrnNum+1
+ E02 C                   endif
+      *
+     C                   eval      *in20=(rrn1>sflDspPag)                       more
+     C                   eval      *in01=(rrn1>0)                               SFLDSP
+     C                   eval      *in02 = *on                                  SFLDSPCTL
+      *
+     C                   write     header                                        DISPLAY
+     C                   exfmt     contrl1                                       SCREENS
+     C                   eval      *in03 = vSflMode
+      * exit / cancel
+ B02 C                   select
+     C                   when      *inkc or *inkl
+     C                   eval      ExitPgmFlg=*on
+      * v4r4---          leavesr
+     C                   goto      outtag                                       F3=exit    v4r2
+      *
+      * refresh
+     C                   when      *inke                                        F5=refresh
+     C                   eval      rrn1=0
+     C                   eval      *in01=*off
+     C                   eval      *in02=*off
+     C                   write     contrl1                                      clear
+      * v4r4---          leavesr                                                F5=REFRESH
+     C                   goto      outtag                                       F5=REFRESH v4r2
+      *
+      * change display mode
+     C                   when      *inkj                                        F10=Hex
+ B03 C                   if        isHexMode
+     C                   eval      isHexMode = *off
+     C                   eval      Shift=58
+ X03 C                   else
+     C                   eval      isHexMode = *on
+     C                   eval      Shift=25
+ E03 C                   endif
+     C                   eval      bgrrnSav=bgrrn
+     C                   exsr      srUpdSfl
+     C                   eval      bgrrn=bgrrnSav
+      * fold/unfold
+     C                   when      *inkk                                        F11=Fold/Unfold
+ B03 C                   if        vSflMode = *on
+     C                   eval      vSflMode = *off
+ X03 C                   else
+     C                   eval      vSflMode = *on
+ E03 C                   endif
+     C                   eval      *in03 = vSflMode
+      *
+      * shift column position to the left
+     C                   when      *inkt                                        F19=column left
+     C                   eval      ColumnShift=ColumnShift-Shift
+ B03 C                   if        ColumnShift<0
+     C                   eval      ColumnShift=1
+ E03 C                   endif
+     C                   eval      vdspPos=ColumnShift
+      *
+      * shift column position to the right
+     C                   when      *inku                                        F20=column right
+     C                   eval      ColumnShift=ColumnShift+Shift
+ B03 C                   if        ColumnShift >= qMsgLength
+     C                   eval      ColumnShift =  qMsgLength - 1
+ E03 C                   endif
+     C                   eval      vdspPos=ColumnShift
+ E02 C                   endsl
+      *
+      *   ---------------------------------------------------------------
+      *   Determine which screen the user wants to display.
+      *   ---------------------------------------------------------------
+ B02 C                   if        vdspNum = 0                                  screen field=0
+ B03 C                   if        bgrrn=0
+     C                   eval      bgrrn=1
+ E03 C                   endif
+     C                   eval      vsrecNum = bgrrn
+ X02 C                   else
+     C                   eval      torecNum = vdspNum * sflDspPag
+ B03 C                   if        torecNum < rrn1                              NOT PAST EOF
+     C                   eval      vsrecNum      = torecNum
+ X03 C                   else
+     C                   eval      vsrecNum      = rrn1                         PAST EOF SELCTD
+ E03 C                   endif
+ E02 C                   endif
+      *
+      *   ---------------------------------------------------------------
+      *   Determine the column offset the user wants to display.
+      *   ---------------------------------------------------------------
+ B02 C                   if        vdspPos > 0
+     C                   eval      ofs = vdspPos - 1
+ B03 C                   if        ofs < 0
+     C                   eval      ofs = 0
+ E03 C                   endif
+ B03 C                   if        ofs >= qMsgLength
+     C                   eval      ofs = qMsgLength - 1
+ E03 C                   endif
+     C                   exsr      srUpdSfl
+     C                   eval      vpos    = ofs + 1
+     C                   eval      vdspPos = 0
+ E02 C                   endif
+      *
+     C                   clear                   vdspNum                        REINIT
+     C                   clear                   torecNum
+ E01 C                   enddo
+     C     outtag        endsr
+      *
+      *----------------------------------------------------------------
+      * Decode the Date-Time_Stamp into MM/DD/YY and HH:MM:SS
+      *----------------------------------------------------------------
+     C     DecodeDate    begsr
+     C                   callp     QWCCVTDT(                                    API DATE CONVRT
+     C                             '*DTS    ':                                  FROM FORMAT
+     C                             vDateTime :                                  TO BE CONVERTED
+     C                             '*MDY    ':                                  TO FORMAT
+     C                             dtDS  :                                      CONVERTED DATE
+     C                             vApiErrDs)
+     C                   eval      qudate=%subst(dtMDY:1:2) + '/' +
+     C                             %subst(dtMDY:3:2) +'/'+ %subst(dtMDY:5:2)
+     C                   eval      qutime=%subst(dtTIME:1:2) + ':' +
+     C                             %subst(dtTIME:3:2) +':'+ %subst(dtTIME:5:2)
+     C                   endsr
+      *
+      *----------------------------------------------------------------
+      * Update Subfile.
+      *----------------------------------------------------------------
+     C     srUpdSfl      begsr
+     C                   eval      vListPtr=uHeadPtr  + vOffset1stEnt           1st offset
+ B01 C     1             do        vqentNum      x
+     C     x             chain     data1
+     C                   exsr      srTempqDS
+     C                   exsr      srDataToDsp
+     C                   update    data1
+     C                   eval      vListPtr=uHeadPtr  + vNextEntry
+ E01 C                   enddo
+     C                   endsr
+      *
+      *----------------------------------------------------------------
+      * Fill TempqDS from User Space Data.
+      * Note: If Keyed data queue, then there is an unexplained 5 bytes at the beginning of
+      * each key...  not sure if this a bug or an undocumented feature.
+      * Also the size of the message entry could be larger than the message variable
+      * allowed..  qTrimLen is used to make sure this doesn't blow up here|
+      *----------------------------------------------------------------
+     C     srTempqDS     begsr
+     C                   eval      qTrimLen      = qMsgLength - ofs
+ B01 C                   if        qAccessTyp ='K'                              keyed
+ B02 C                   If        (5+qKeyLength)+qMsgLength > %size(vMsgVar)
+     C                   eval      qTrimLen=%size(vmsgvar)-(5+qKeyLength)
+ E02 C                   endif
+ B02 C                   if        qTrimLen > %len(ViewqDS)
+     C                   eval      qTrimLen = %len(ViewqDS)
+ E02 C                   endif
+     C                   eval      TempqDS =                                      extract message
+     C                             %subst(vmsgvar:5+qKeyLength+ofs:qTrimLen)
+ X01 C                   else
+ B02 C                   If        qMsgLength > %size(vMsgVar)
+     C                   eval      qTrimLen=%size(vmsgvar)
+ E02 C                   endif
+ B02 C                   if        qTrimLen > %len(ViewqDS)
+     C                   eval      qTrimLen = %len(ViewqDS)
+ E02 C                   endif
+     C                   eval      TempqDS  = %subst(vmsgvar:1+ofs:qTrimLen)      extract message
+ E01 C                   endif
+     C                   endsr
+      *----------------------------------------------------------------
+      * Move Data to Display Field.
+      *----------------------------------------------------------------
+     C     srDataToDsp   begsr
+ B01 C                   if        isHexMode
+     C                   eval      ViewqDS = ''
+     C                   callp     cvthc(%addr(ViewqDS)       :
+     C                                   %addr(TempqDS)       :
+     C                                   qTrimLen * 2         )
+ X01 C                   else
+     C                   eval      ViewqDS = %subst(TempqDS: 1      )
+      *    -----------------------------------------------------------------------------------
+      *    Drop anything below hex 40 before sending it to the screen.
+      *    -----------------------------------------------------------------------------------
+     C                   eval      ff= qTrimLen
+ B02 C                   do        ff            aa
+ B03 C                   if        %subst(ViewqDS:aa:1)<Hex40
+     C                   eval      %subst(ViewqDS:aa:1)=' '
+ E03 C                   endif
+ E02 C                   enddo
+ E01 C                   endif
+     C                   endsr
+]]>  </copysrc>
+</mbr>
+<compile  condition="*NONE"><![CDATA[
+CRTBNDRPG PGM(&tolib/DSPDTAQR) SRCFILE(&tolib/QDSPDTAQ) TRUNCNBR(*NO) DBGVIEW(*LIST) DFTACTGRP(*YES)
+]]>  </compile>
+<sendmsg  sendmsgid="CPF9897" sendmsgtype = "*STATUS   "><![CDATA[
+Installing DSPDTAQRV  type RPGLE - in progress.
+]]>  </sendmsg>
+<!-- START OF MEMBER  -->
+<mbr
+mbrname =  "DSPDTAQRV "
+mbrtype =  "RPGLE     "
+mbrtext =  "Validity checker for lib/obj objtype           jcr"
+srcfile =  "QDSPDTAQ  "
+srclib  =  "selected  "
+srclen  =  "00112"
+srccssid=  "00273">
+<copysrc><![CDATA[
+     H DFTACTGRP(*NO) ACTGRP(*CALLER) EXPROPTS(*RESDECPOS)
+     H DATFMT(*ISO)   TIMFMT(*ISO)    OPTION(*NODEBUGIO)
+      *----------------------------------------------------------------
+      * OBJCHKRV- Validity checking program
+      * Copyright (C) 04/13/1986  Craig Rutledge   <craig_rutledge@mohawkind.com>
+      * This program is free software, you can redistribute it and/or modify it under the terms
+      * of the GNU General Public License as published by the Free Software Foundation.
+      * 09/07/2001 - converted from CL to use APIs
+      *----------------------------------------------------------------
+      * program summary:
+      * execute api to retrieve object description.
+      * if error returned by api,
+      *    retrieve message with replacement values
+      *    send message back to command.
+      *----------------------------------------------------------------
+      * api (application program interfaces) used:
+      * qusrobjd  get object description
+      * qmhrtvm   retrieve messages
+      * qmhsndpm  send messages
+      *----------------------------------------------------------------
+      * >>PRE-COMPILER<<
+      *
+      *   >>CRTCMD<< CRTBNDRPG    PGM(&LI/&OB) +
+      *                           SRCFILE(&SL/&SF) +
+      *                           SRCMBR(&SM);
+      *
+      *   >>COMPILE<<
+      *     >>PARM<< TRUNCNBR(*NO);
+      *     >>PARM<< DBGVIEW(*LIST);
+      *     >>PARM<< DFTACTGRP(*YES);
+      *   >>END-COMPILE<<
+      *
+      *   >>EXECUTE<<
+      *
+      * >>END-PRE-COMPILER<<
+      * ---------------------------------------------------------------
+     D mMsgRtv         ds                  inz
+     D mMsgRtvLen              9     12i 0                                      length msg retrieved
+     D mMsgMessage            25    256                                         message retrieved
+     D mMsgLen         s             10i 0 inz(%len(mMsgRtv))                   length of message
+     D qm_msgid        s              7
+     D qm_msgtxt       s            128
+     D qm_msgtyp       s             10
+     D alpha8          s              8
+      *
+      *--------------------------------------------------------------------
+      * create parm prototypes
+      *--------------------------------------------------------------------
+     D qusrobjd        PR                  ExtPgm('QUSROBJD')                   object descriptions
+     Db                               8
+     D                               10i 0 const
+     D                                8    const                                TYPE FORMAT
+     D                               20    const                                OBJ  LIB
+     D                               10    const                                OBJ TYPE
+     Db                                    like(vApiErrDS)                      error parm
+      *    -------------------------------------------------------------
+     D qmhrtvm         PR                  ExtPgm('QMHRTVM')                    RETRIEVE MESSAGE
+     D                              256                                         message retrieved
+     D                               10i 0                                      length of message
+     D                                8    const                                requested format
+     D                                7                                         msg identifier
+     D                               20    const                                qualified msgf name
+     D                              128                                         replacement data
+     D                               10i 0 const                                len of replace data
+     D                               10    const                                substitution char
+     D                               10    const                                format control char
+     Db                                    like(vApiErrDs)
+      *
+      *--------------------------------------------------------------------
+     D qmhsndpm        PR                  ExtPgm('QMHSNDPM')                   SEND MESSAGES
+     D                                7                                         ID
+     D                               20    const                                FILE
+     Db                                    like(qm_msgtxt)                      TEXT
+     D                               10i 0 const                                LENGTH
+     D                               10    const                                TYPE
+     D                               10    const                                QUEUE
+     D                               10i 0 const                                STACK ENTRY
+     D                                4    const                                KEY
+     Db                                    like(vApiErrDS)
+      *    -------------------------------------------------------------
+      * Error return code parm for APIs.
+     D vApiErrDs       ds
+     D  vbytpv                       10i 0 inz(%size(vApiErrDs))                bytes provided
+     D  vbytav                       10i 0 inz(0)                               bytes returned
+     D  vmsgid                        7a                                        error msgid
+     D  vresvd                        1a                                        reserved
+     D  vrpldta                     128a                                        replacement data
+      *    -------------------------------------------------------------
+     D  main           PR                  extpgm('OBJCHKRV ')
+     D  i_obj_lib                    20A   const
+     D  i_otyp                       10A   const
+      *    -------------------------------------------------------------
+     D  main           PI
+     D  i_obj_olib                   20A   const
+     D  i_otyp                       10A   const
+      *
+      *---------------------------------------------------------------------------------------
+      * check to see if object exists.
+     C                   callp     QUSROBJD(                                    get object descripti
+     C                             alpha8:
+     C                             8:
+     C                             'OBJD0100':                                  TYPE FORMAT
+     C                             i_obj_olib:                                  OBJ LIB  20
+     C                             i_otyp:                                      OBJ TYPE
+     C                             vapierrds)
+ B01 C                   if        vbytav>0                                     error occurred
+      *
+      * call retrieve message API to pull in the subsitution variables
+     C                   callp     QMHRTVM(                                     rtvmsgd
+     C                             mMsgRtv :                                    message retrieved
+     C                             mMsgLen :                                    length of message
+     C                             'RTVM0100':                                  requested format
+     C                             vmsgid:                                      msg identifier
+     C                             'QCPFMSG   *LIBL':                           qualified msg file
+     C                             vrpldta:                                     replacement data
+     C                             %size(vrpldta):                              len of replace data
+     C                             '*YES      ':                                substitution char
+     C                             '*NO       ':                                format control char
+     C                             vApiErrDs)
+      *
+      * set values to send messages, make message size not too big
+ B02 C                   if        mMsgRtvLen > %size(mMsgMessage)
+     C                   eval      mMsgRtvLen = %size(mMsgMessage)
+ E02 C                   endif
+     C                   eval      QM_msgtxt =
+     C                             '0000 ' + %trimr(vmsgid) +': ' +
+     C                                       %subst(mMsgMessage:1:mMsgRtvLen)
+     C                   eval      QM_msgid = 'CPD0006'
+     C                   eval      QM_msgtyp = '*DIAG'
+     C                   exsr      srSndErrMsg                                  send error message
+      *
+     C                   eval      qm_msgtxt  = *blanks
+     C                   eval      qm_msgid   = 'CPF0002'
+     C                   eval      qm_msgtyp  = '*ESCAPE'
+     C                   exsr      srSndErrMsg
+ E01 C                   endif
+     C                   eval      *inlr=*on
+     C                   return
+      *
+      * call send program message api
+     C     srSndErrMsg   begsr
+     C                   callp     qmHSNDPM(
+     C                             qm_msgid:
+     C                             'QCPFMSG   *LIBL     ':
+     C                             qm_msgtxt:
+     C                             %size(qm_msgtxt):
+     C                             qm_msgtyp:
+     C                             '*CTLBDY':
+     C                             1:
+     C                             '    ':
+     C                             vApiErrDS)
+     C                   endsr
+]]>  </copysrc>
+</mbr>
+<compile  condition="*NONE"><![CDATA[
+CRTBNDRPG PGM(&tolib/DSPDTAQRV) SRCFILE(&tolib/QDSPDTAQ) TRUNCNBR(*NO) DBGVIEW(*LIST) DFTACTGRP(*YES
+)
+]]>  </compile>
+<sendmsg  sendmsgid="CPF9897" sendmsgtype = "*STATUS   "><![CDATA[
+Installing DSPDTAQ  type CMD - in progress.
+]]>  </sendmsg>
+<!-- START OF MEMBER  -->
+<mbr
+mbrname =  "DSPDTAQ   "
+mbrtype =  "CMD       "
+mbrtext =  "gssplay data queue entries                     jcr"
+srcfile =  "QDSPDTAQ  "
+srclib  =  "selected  "
+srclen  =  "00112"
+srccssid=  "00273">
+<copysrc><![CDATA[
+/* ----------------------------------------------------------------- */
+/* DSPDQE- Display Data Queue Entries - Command Definition           */
+/* By   Craig Rutledge, 06/11/93                                     */
+/* ----------------------------------------------------------------- */
+/* Command Summary:                                                  */
+/* The command will display, in a subfile, all entries in a DATAQ.   */
+/* The entries on the queue are not touched or disturbed.            */
+/* ----------------------------------------------------------------- */
+/* Related Objects:                                                  */
+/* DSPDTAQR   *PGM    RPGLE    display data queue entries            */                   /* RADD */
+/* DSPDTAQD   *FILE   DSPF                                           */                   /* RADD */
+/* DSPDTAQP   *PNLGRP          Help Text                             */                   /* RADD */
+/* DSPDTAQRV  *PGM    RPGLE    Validity checker                      */                   /* RADD */
+/* ----------------------------------------------------------------- */
+/* >>PRE-COMPILER<<                                                  */
+/*                                                                   */
+/*   >>CRTCMD<< CRTCMD       CMD(&LI/&OB) +                          */
+/*                           SRCFILE(&SL/&SF) +                      */
+/*                           SRCMBR(&SM);                            */
+/*                                                                   */
+/*   >>COMPILE<<                                                     */
+/*     >>PARM<< PGM(*LIBL/DSPDTAQR);                                 */
+/*     >>PARM<< ALWLMTUSR(*NO);                                      */
+/*     >>PARM<< HLPID(DSPDTAQ);                                      */
+/*     >>PARM<< MODE(*ALL);                                          */
+/*     >>PARM<< ALLOW(*ALL);                                         */
+/*     >>PARM<< VLDCKR(&LI/DSPDTAQRV);                               */
+/*     >>PARM<< HLPPNLGRP(&LI/DSPDTAQP);                             */
+/*     >>PARM<< TEXT(*SRCMBRTXT);                                    */
+/*     >>PARM<< PRDLIB(&LI);                                         */
+/*   >>END-COMPILE<<                                                 */
+/*                                                                   */
+/*   >>EXECUTE<<                                                     */
+/*                                                                   */
+/* >>END-PRE-COMPILER<<                                              */
+/* ----------------------------------------------------------------- */
+             CMD        PROMPT('Display Data Queue Entries')
+
+             PARM       KWD(DTAQ) TYPE(QUAL1) MIN(1) PROMPT('Data +
+                          queue:')
+             PARM       KWD(OBJTYP) TYPE(*CHAR) LEN(10) +
+                          CONSTANT('*DTAQ     ')
+
+ QUAL1:      QUAL       TYPE(*NAME) LEN(10) MIN(1)
+             QUAL       TYPE(*NAME) LEN(10) DFT(*LIBL) +
+                          SPCVAL((*LIBL)) PROMPT('Library name:')
+]]>  </copysrc>
+</mbr>
+<qcmdexc condition="*NONE" release="*CURRENT" dltsplf="*NONE"><![CDATA[
+CRTCMD CMD(&tolib/DSPDTAQ) PGM(*LIBL/DSPDTAQR) SRCFILE(&tolib/QDSPDTAQ) SRCMBR(DSPDTAQ) ALWLMTUSR(*N
+O) HLPID(DSPDTAQ) VLDCKR(&tolib/DSPDTAQRV) MODE( *PROD *DEBUG *SERVICE) ALLOW( *BPGM *IPGM *EXEC *IN
+TERACT *BATCH *BREXX *IREXX *BMOD *IMOD) HLPPNLGRP(&tolib/DSPDTAQP) PRDLIB(&tolib) TEXT(*SRCMBRTXT)
+]]>  </qcmdexc>
+<sendmsg  sendmsgid="CPF9897" sendmsgtype = "*COMP     "><![CDATA[
+Application DSPDTAQ successfully installed.
+]]>  </sendmsg>
+</upload>

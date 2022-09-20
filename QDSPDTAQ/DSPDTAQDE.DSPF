@@ -1,0 +1,115 @@
+      *----------------------------------------------------------------
+      * DSPDQE - Display Data Queue Entries
+      * By   Craig Rutledge,  6/11/93
+      *----------------------------------------------------------------
+      * >>PRE-COMPILER<<
+      *
+      *   >>CRTCMD<< CRTDSPF      FILE(&LI/&OB) +
+      *                           SRCFILE(&SL/&SF) +
+      *                           SRCMBR(&SM);
+      *
+      *   >>COMPILE<<
+      *   >>END-COMPILE<<
+      *
+      *   >>EXECUTE<<
+      *
+      * >>END-PRE-COMPILER<<
+      * ---------------------------------------------------------------
+     A                                      DSPSIZ(24 80 *DS3)
+     A                                      CA03
+     A                                      CA05
+     A                                      CA10
+     A                                      CA11
+     A                                      CA12
+     A                                      CA19
+     A                                      CA20
+     A                                      PRINT
+     A          R HEADER
+     A                                  1  2'DSPDQE '
+     A                                      COLOR(BLU)
+     A                                  1 25'Display Data Queue Entries'
+     A                                      DSPATR(HI)
+     A                                      DSPATR(UL)
+     A                                      COLOR(BLU)
+     A                                  1 62'jcr'
+     A                                      COLOR(BLU)
+     A                                  1 72DATE
+     A                                      EDTWRD('0  /  /  ')
+     A                                      COLOR(BLU)
+     A                                  2  2'Name:'
+     A            VQNAME        10A  O  2  8DSPATR(HI)
+     A                                  2 19'Lib:'
+     A            VQLIB         10A  O  2 24DSPATR(HI)
+     A                                  2 35'Len:'
+     A            VLEN           5Y 0O  2 40EDTCDE(4)
+     A                                      DSPATR(HI)
+     A                                  2 48'Seq:'
+     A            VACSTYPE      10A  O  2 53DSPATR(HI)
+     A                                  2 72SYSNAME
+     A                                      COLOR(BLU)
+     A                                  3 18'Text:'
+     A            QTEXT         50A  O  3 24DSPATR(HI)
+     A                                  4  2'Date    '
+     A                                      DSPATR(UL)
+     A                                      DSPATR(HI)
+     A                                  4 11'Time    '
+     A                                      DSPATR(UL)
+     A                                      DSPATR(HI)
+     A            VRULER        58A  O  4 21DSPATR(HI)
+     A                                      DSPATR(UL)
+     A          R DATA1                     SFL
+     A            QUDATE         8A  O  5  2
+     A            QUTIME         8A  O  5 11
+     A            VIEWQ1        58A  O  5 21
+     A            VIEWQ2        58A  O  6 21
+      *
+     A          R CONTRL1                   SFLCTL(DATA1)
+      *%%TS  SD  20011204  123500  RUTLEDGEC   REL-V4R4M0  5769-PW1
+     A                                      SFLSIZ(0700)
+     A                                      SFLPAG(0007)
+     A                                      OVERLAY
+     A  03                                  SFLDROP(CA13)
+     A N03                                  SFLFOLD(CA13)
+     A  01                                  SFLDSP
+     A  02                                  SFLDSPCTL
+     A N01                                  SFLCLR
+     A N06                                  SFLEND(*MORE)
+     A                                      SFLMODE(&VSFLMODE)
+     A            VSFLMODE       1A  H
+     A            VSRECNUM       4S 0H      SFLRCDNBR
+     A                                 20  2'                                  -
+     A                                                                         -
+     A                                               '
+     A                                      DSPATR(UL)
+     A  20                             21  2'Position to screen:'
+     A  20        VDSPNUM        3Y 0B 21 23EDTCDE(4)
+     A                                      DSPATR(HI)
+     A  20        VSCRNNUM       3Y 0O 21 28EDTCDE(4)
+     A  20                             21 32'Screens'
+     A            VQTOTCNT       7Y 0O 21 49EDTCDE(4)
+     A                                 21 57'Total Queue Entries'
+     A                                 22  2'Shift to column:'
+     A  01        VDSPPOS        5Y 0B 22 21EDTCDE(4)
+     A                                      DSPATR(HI)
+     A  01        VPOS           3Y 0O 22 28EDTCDE(4)
+     A  01                             22 32'Current column'
+     A            VQENTNUM       7Y 0O 22 49EDTCDE(4)
+     A                                 22 57'Retrieved by API'
+     A                                 23  2'F3=Exit'
+     A                                      COLOR(BLU)
+     A                                 23 17'F5=Refresh'
+     A                                      COLOR(BLU)
+     A                                 23 32'F10=Hex'
+     A                                      COLOR(BLU)
+     A                                 23 45'F11=UnFold/Fold'
+     A                                      COLOR(BLU)
+     A                                 23 64'F12=Cancel'
+     A                                      COLOR(BLU)
+     A N01                             24  2'No Entries are currently in data q-
+     A                                      ueue.'
+     A                                      DSPATR(HI)
+     A                                      DSPATR(RI)
+     A                                 24 45'F19=Shift Left'
+     A                                      COLOR(BLU)
+     A                                 24 64'F20=Shift Right'
+     A                                      COLOR(BLU)
