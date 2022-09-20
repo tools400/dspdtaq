@@ -30,6 +30,10 @@
                           XFROMSRCL(TOOLS400) XTOSRCF(QDSPDTAQ ) XOBJTYPE(*PGM) +
                           XGENCRT(*NO ) XPARAM(*BLANK)
 
+             XMLGENMBR  XMBR(A_README  ) XMBRATR(TXT   ) XFROMSRCF(QDSPDTAQ  ) +
+                          XFROMSRCL(TOOLS400) XTOSRCF(QDSPDTAQ ) XOBJTYPE(*PGM) +
+                          XGENCRT(*NO ) XPARAM(*BLANK)
+
              XMLGENMBR  XMBR(COPYRIGHT ) XMBRATR(RPGLE ) XFROMSRCF(QDSPDTAQ  ) +
                           XFROMSRCL(TOOLS400) XTOSRCF(QDSPDTAQ ) XOBJTYPE(*MODULE) +
                           XGENCRT(*NO ) XPARAM(*BLANK)
