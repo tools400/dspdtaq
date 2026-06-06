@@ -1,10 +1,15 @@
-DSPDTAQ - A Craig Rutledge and Tools/400 Utility
-------------------------------------------------
+# DSPDTAQ - A Craig Rutledge and Tools/400 Utility
 
 DSPDTAQ is a simple utility for displaying the content of a given
 data queue. The utility does not change or even remove queue entries.
 
-Dependencies: *NONE
+## Dependencies
+
+Dependencies:
+
+None.
+
+## Installation
 
 Compile members with the following PDM option:
 
@@ -15,4 +20,8 @@ Compile members with the following PDM option:
 Members of type MAKPGM or BND are used for linking programs (MAKPGM)
 and service programs (BND).
 
-2001, Thomas Raddatz
+The [STRPREPRC](https://github.com/tools400/strpreprc) utility is used for compiling the members. The utility retrieves object creation parameters from the source member that is compiled and building and executing the final object creation command.
+
+---
+
+2022, Thomas Raddatz

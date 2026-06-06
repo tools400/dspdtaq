@@ -1,8 +1,7 @@
-      /if not defined(COPYRIGHT_DSPEC)
-     h copyright('V1.0.0 - 05.12.2001 - mailto: thomas.raddatz@tools400.de')
-      /eof
-      /endif
-     D DSPDTAQ_VERSION...
-     D                 C                   '1.0.0'
-     D DSPDTAQ_DATE...
-     D                 C                   '05.12.2001'
+**free
+/if not defined(COPYRIGHT_DSPEC)
+ctl-opt copyright('V1.1.0 - 06.06.2026 - mailto: thomas.raddatz@tools400.de');
+/eof
+/endif
+dcl-c DSPDTAQ_VERSION '1.1.0';
+dcl-c DSPDTAQ_DATE '06.06.2026';
